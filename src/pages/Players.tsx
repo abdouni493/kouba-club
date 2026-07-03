@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
 import Barcode from 'react-barcode';
 import {
@@ -9,13 +9,13 @@ import {
 } from 'lucide-react';
 import { PageHeader, Badge, EmptyState, useConfirm, SearchInput, Avatar, Tabs } from '../components/ui/Display';
 import Modal from '../components/ui/Modal';
-import { Input, Select, SearchSelect } from '../components/ui/Fields';
+import { Input, Select } from '../components/ui/Fields';
 import { useData } from '../context/DataContext';
 import { useToast } from '../context/ToastContext';
 import { useScan } from '../components/scan/ScanCenter';
 import { useLookups } from '../lib/selectors';
 import { usePermissions } from '../lib/permissions';
-import { money, uid, today, fmtDate, addDays, daysUntil } from '../lib/utils';
+import { money, uid, today, fmtDate, addDays, daysUntil, cx } from '../lib/utils';
 import { sendClubEmail } from '../lib/email';
 import { buildPlayerSubscriptionPdf } from '../lib/pdf';
 import type { Player, AssignedSubscription, Payment } from '../lib/types';
@@ -132,10 +132,6 @@ export default function Players() {
           <Input label={t('players.birthPlace')} value={form.birthPlace} onChange={(e) => setForm({ ...form, birthPlace: e.target.value })} />
           <Input label={t('common.phone')} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           <Input label={t('common.email')} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <div className="sm:col-span-2">
-            <Select label={t('players.parentInfo')} value={form.parentId} onChange={(v) => setForm({ ...form, parentId: v })} placeholder={t('common.none')}
-              options={data.parents.map((p) => ({ value: p.id, label: `${p.firstName} ${p.lastName}` }))} />
-          </div>
         </div>
       </Modal>
 
@@ -289,6 +285,7 @@ export default function Players() {
   function AssignModal({ p, onClose }: { p: Player; onClose: () => void }) {
     const [subId, setSubId] = useState(p.assignedSubscription?.subscriptionId || '');
     const [startDate, setStartDate] = useState(today());
+    const [searchQuery, setSearchQuery] = useState('');
     const sub = data.subscriptions.find((s) => s.id === subId);
     const regFeeAmount = data.club.regFeeAmount || 0;
     const alreadyPaidReg = p.subscriptionCostPaid;
@@ -301,7 +298,12 @@ export default function Players() {
     const amountPaidClamped = Math.min(amountPaid, price);
     const rest = Math.max(0, price - amountPaidClamped);
 
-    const onPick = (v: string) => { setSubId(v); const s = data.subscriptions.find((x) => x.id === v); setAmountPaid((s?.totalPrice || 0) + feeToCollect); };
+    const onPick = (v: string) => {
+      setSubId(v);
+      const s = data.subscriptions.find((x) => x.id === v);
+      const fee = !alreadyPaidReg && collectFee ? regFeeAmount : 0;
+      setAmountPaid((s?.totalPrice || 0) + fee);
+    };
 
     const save = () => {
       if (!sub) { toast('Sélectionnez un abonnement', 'error'); return; }
@@ -320,44 +322,191 @@ export default function Players() {
       setEmailAsk(p);
     };
 
+    const filteredSubs = data.subscriptions.filter(s =>
+      s.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
     return (
       <Modal open onClose={onClose} size="lg" title={t('players.assignSub')} subtitle={L.playerName(p)}
         footer={<><button onClick={onClose} className="btn-ghost">{t('common.cancel')}</button><button onClick={save} className="btn-primary">{t('common.save')}</button></>}>
-        <div className="space-y-4">
-          <SearchSelect label={t('subs.searchTiming')} value={subId} onChange={onPick} placeholder={t('subs.searchTiming')}
-            options={data.subscriptions.map((s) => ({ value: s.id, label: s.name, sub: `${money(s.totalPrice)} · ${s.periodDays}j` }))} />
-          {sub && (
-            <>
-              <div className="grid sm:grid-cols-2 gap-4">
-                <Input label={t('common.startDate')} type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                <div><label className="label">{t('players.expiry')}</label><div className="input bg-surface-3 flex items-center gap-2"><Calendar className="h-4 w-4 text-accent" />{fmtDate(expiry)}</div></div>
-              </div>
-              <div className="grid sm:grid-cols-3 gap-4">
-                <div><label className="label">{t('common.price')}</label><div className="input bg-surface-3 font-bold">{money(price)}</div></div>
-                <Input label={t('players.howMuchPaid')} type="number" value={amountPaid} onChange={(e) => setAmountPaid(Math.min(price, Math.max(0, +e.target.value)))} />
-                <div><label className="label">{t('common.rest')}</label><div className={`input bg-surface-3 font-bold ${rest > 0 ? 'text-danger' : 'text-success'}`}>{money(rest)}</div></div>
-              </div>
-
-              {alreadyPaidReg ? (
-                <div className="rounded-xl bg-success/10 border border-success/30 px-4 py-3 flex items-center gap-2">
-                  <Check className="h-4 w-4 text-success" />
-                  <span className="text-sm font-semibold text-fg">{t('players.regPaid')}</span>
-                </div>
-              ) : (
-                <div className="rounded-xl bg-danger/10 border border-danger/30 p-3.5">
-                  <div className="flex items-center gap-2 text-danger font-semibold text-sm"><AlertTriangle className="h-4 w-4" />{t('players.regUnpaid')}</div>
-                  <label className="flex items-center gap-3 mt-2.5 cursor-pointer">
-                    <input type="checkbox" checked={collectFee} onChange={(e) => setCollectFee(e.target.checked)} className="h-5 w-5 accent-[rgb(var(--accent))]" />
-                    <span className="text-xs text-fg">{t('players.collectFeeNow')}{regFeeAmount > 0 ? ` (${money(regFeeAmount)})` : ''}</span>
-                  </label>
-                </div>
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <label className="label">Rechercher & Sélectionner un abonnement</label>
+            <input
+              type="text"
+              className="input"
+              placeholder="Tapez pour rechercher un abonnement..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            
+            <div className="grid sm:grid-cols-2 gap-3 max-h-[220px] overflow-y-auto pr-1 no-scrollbar mt-3">
+              {filteredSubs.map((s) => {
+                const isSelected = s.id === subId;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => onPick(s.id)}
+                    className={cx(
+                      "text-left p-4 rounded-2xl border transition-all duration-300 relative overflow-hidden group flex flex-col justify-between h-[110px]",
+                      isSelected
+                        ? "bg-accent/10 border-accent text-fg shadow-glow"
+                        : "bg-surface-2 hover:bg-surface-3 border-line/10 hover:border-accent/40 text-fg"
+                    )}
+                  >
+                    {isSelected && (
+                      <div className="absolute top-3 right-3 h-5 w-5 rounded-full bg-accent text-black flex items-center justify-center">
+                        <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                      </div>
+                    )}
+                    <div>
+                      <p className="font-bold text-sm leading-tight group-hover:text-accent transition-colors pr-6">{s.name}</p>
+                      <p className="text-[11px] text-muted mt-1">{s.periodDays} jours</p>
+                    </div>
+                    <div className="flex justify-between items-baseline mt-2 pt-2 border-t border-line/5">
+                      <span className="text-[10px] text-faint uppercase font-bold tracking-wider">Tarif</span>
+                      <span className="font-display font-extrabold text-accent">{money(s.totalPrice)}</span>
+                    </div>
+                  </button>
+                );
+              })}
+              {filteredSubs.length === 0 && (
+                <p className="text-sm text-muted py-6 text-center col-span-2">Aucun abonnement trouvé</p>
               )}
+            </div>
+          </div>
 
-              <div className={`rounded-xl border px-4 py-3 ${rest > 0 ? 'bg-warning/10 border-warning/30' : 'bg-success/10 border-success/30'}`}>
-                <p className="text-sm font-semibold">{rest > 0 ? `⚠ Enregistré comme créance — reste ${money(rest)}` : '✓ Enregistré comme payé'}</p>
-              </div>
-            </>
-          )}
+          <AnimatePresence mode="wait">
+            {sub && (
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 15 }}
+                className="grid md:grid-cols-5 gap-6 pt-5 border-t border-line/10"
+              >
+                {/* Inputs area */}
+                <div className="md:col-span-3 space-y-4">
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-accent-soft flex items-center gap-2">
+                    <Calendar className="h-4 w-4" /> Paramètres & Frais
+                  </h4>
+                  
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <Input
+                      label={t('common.startDate')}
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                    />
+                    <div>
+                      <label className="label">{t('players.expiry')}</label>
+                      <div className="input bg-surface-3 flex items-center gap-2 font-medium">
+                        <Calendar className="h-4 w-4 text-accent" />
+                        {fmtDate(expiry)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {alreadyPaidReg ? (
+                    <div className="rounded-2xl bg-success/10 border border-success/20 px-4 py-3.5 flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-xl bg-success/25 flex items-center justify-center text-success">
+                        <Check className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-fg">{t('players.regPaid')}</p>
+                        <p className="text-xs text-muted">Frais d'inscription réglés</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl bg-surface-2 border border-line/10 p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="h-8 w-8 rounded-xl bg-warning/10 border border-warning/20 flex items-center justify-center text-warning shrink-0 mt-0.5">
+                          <AlertTriangle className="h-4 w-4" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-fg">{t('players.regUnpaid')}</p>
+                          <p className="text-xs text-muted mb-3">Frais d'inscription de {money(regFeeAmount)} restants</p>
+                          <label className="flex items-center gap-3 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={collectFee}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setCollectFee(checked);
+                                const newFee = checked ? regFeeAmount : 0;
+                                setAmountPaid(subPrice + newFee);
+                              }}
+                              className="h-5 w-5 accent-[rgb(var(--accent))] rounded border-line/20"
+                            />
+                            <span className="text-xs text-fg font-semibold">{t('players.collectFeeNow')}</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <Input
+                    label="Montant versé par le joueur"
+                    type="number"
+                    value={amountPaid}
+                    max={price}
+                    min={0}
+                    onChange={(e) => {
+                      const val = +e.target.value;
+                      setAmountPaid(Math.min(price, Math.max(0, val)));
+                    }}
+                  />
+                </div>
+
+                {/* Summary Panel */}
+                <div className="md:col-span-2 bg-surface-2 rounded-2xl border border-line/10 p-5 flex flex-col justify-between">
+                  <div>
+                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-4">Résumé financier</h4>
+                    <div className="space-y-3">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted">Abonnement</span>
+                        <span className="font-semibold text-fg">{money(subPrice)}</span>
+                      </div>
+                      {!alreadyPaidReg && collectFee && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted">Frais d'inscr.</span>
+                          <span className="font-semibold text-fg">+{money(regFeeAmount)}</span>
+                        </div>
+                      )}
+                      <div className="h-px bg-line/10 my-2" />
+                      <div className="flex justify-between items-baseline">
+                        <span className="text-sm font-bold text-fg">Total à régler</span>
+                        <span className="text-xl font-display font-extrabold text-accent">{money(price)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 pt-4 border-t border-line/10 space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-muted uppercase">Solde restant</span>
+                      <span className={cx(
+                        "text-lg font-display font-extrabold",
+                        rest > 0 ? "text-danger" : "text-success"
+                      )}>
+                        {money(rest)}
+                      </span>
+                    </div>
+
+                    <div className={cx(
+                      "rounded-xl border px-3.5 py-2.5 text-xs text-center font-medium transition-all duration-300",
+                      rest > 0
+                        ? "bg-warning/10 border-warning/20 text-warning"
+                        : "bg-success/10 border-success/20 text-success"
+                    )}>
+                      {rest > 0
+                        ? `Acompte payé — reste ${money(rest)}`
+                        : "Intégralement payé ✓"}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </Modal>
     );
