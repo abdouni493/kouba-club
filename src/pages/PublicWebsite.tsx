@@ -1,21 +1,60 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Phone, MessageCircle, Mail, MapPin, ArrowRight, ArrowLeft, Share2, Sparkles } from 'lucide-react';
+import { Trophy, Phone, MessageCircle, Mail, MapPin, ArrowRight, ArrowLeft, Share2, Sparkles, X } from 'lucide-react';
 import { useData } from '../context/DataContext';
+import { TiltCard, TiltButton, SpotlightCard } from '../components/ui/Tilt';
 import { activityBg } from './WebsiteManagement';
+import type { Activity } from '../lib/types';
+
+// Code-split the WebGL hero so three.js never blocks first paint
+const HeroScene = lazy(() => import('../components/3d/HeroScene'));
+
+// Skip WebGL entirely on small/low-end devices — the CSS gradient blobs remain as the backdrop
+function canRun3D() {
+  if (typeof window === 'undefined') return false;
+  const cores = navigator.hardwareConcurrency ?? 4;
+  const memory = (navigator as { deviceMemory?: number }).deviceMemory ?? 4;
+  const canvas = document.createElement('canvas');
+  const webgl = !!(canvas.getContext('webgl2') || canvas.getContext('webgl'));
+  return webgl && cores >= 4 && memory >= 4 && window.innerWidth >= 640;
+}
 
 export default function PublicWebsite() {
   const { data } = useData();
   const navigate = useNavigate();
   const [showGrid, setShowGrid] = useState(false);
+  const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
+  const [enable3D] = useState(canRun3D);
   const c = data.contact;
 
   const call = () => c.phone && (window.location.href = `tel:${c.phone}`);
-  const whatsapp = () => c.whatsapp && window.open(`https://wa.me/${c.whatsapp.replace(/\D/g, '')}`, '_blank');
+  
+  const whatsappJoin = () => {
+    const num = c.whatsapp || c.phone;
+    if (!num) return;
+    const cleanNum = num.replace(/\D/g, '');
+    const text = encodeURIComponent(`Bonjour ! Je souhaite rejoindre le club ${data.club.name}. Pouvez-vous me donner plus d'informations ?`);
+    window.open(`https://wa.me/${cleanNum}?text=${text}`, '_blank');
+  };
+
+  const whatsappActivity = (activityName: string) => {
+    const num = c.whatsapp || c.phone;
+    if (!num) return;
+    const cleanNum = num.replace(/\D/g, '');
+    const text = encodeURIComponent(`Bonjour ! Je souhaite m'inscrire à l'activité "${activityName}" au sein du club ${data.club.name}.`);
+    window.open(`https://wa.me/${cleanNum}?text=${text}`, '_blank');
+  };
+
+  const whatsappContact = () => {
+    const num = c.whatsapp || c.phone;
+    if (!num) return;
+    const cleanNum = num.replace(/\D/g, '');
+    window.open(`https://wa.me/${cleanNum}`, '_blank');
+  };
 
   // Build marquee items list to ensure smooth looping (requires duplicating items if array is small)
-  const marqueeItems = [];
+  const marqueeItems: Activity[] = [];
   if (data.activities && data.activities.length > 0) {
     const repeatCount = Math.max(4, Math.ceil(12 / data.activities.length));
     for (let i = 0; i < repeatCount; i++) {
@@ -25,8 +64,51 @@ export default function PublicWebsite() {
 
   return (
     <div className="min-h-screen bg-bg text-fg overflow-x-hidden relative selection:bg-accent selection:text-black">
-      {/* Subtle page-wide decorative radial gradient */}
-      <div className="absolute top-0 left-0 right-0 h-[1000px] bg-gradient-to-b from-accent-strong/5 via-transparent to-transparent pointer-events-none z-0" />
+      {/* Premium ambient backdrop glow & floating decorative elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+        <div className="absolute top-0 left-0 right-0 h-[1000px] bg-gradient-to-b from-accent-strong/5 via-transparent to-transparent" />
+        
+        <motion.div
+          animate={{
+            x: [0, 80, -40, 0],
+            y: [0, -80, 40, 0],
+            scale: [1, 1.15, 0.9, 1],
+          }}
+          transition={{
+            duration: 22,
+            repeat: Infinity,
+            ease: "easeInOut"
+          }}
+          className="absolute top-[10%] left-[5%] w-80 h-80 rounded-full bg-accent/10 blur-[100px]"
+        />
+        
+        <motion.div
+          animate={{
+            x: [0, -100, 60, 0],
+            y: [0, 60, -90, 0],
+            scale: [1, 0.95, 1.1, 1],
+          }}
+          transition={{
+            duration: 26,
+            repeat: Infinity,
+            ease: "easeInOut"
+          }}
+          className="absolute top-[25%] right-[8%] w-[450px] h-[450px] rounded-full bg-accent-soft/8 blur-[120px]"
+        />
+        
+        <motion.div
+          animate={{
+            x: [0, 50, -70, 0],
+            y: [0, 80, -30, 0],
+          }}
+          transition={{
+            duration: 18,
+            repeat: Infinity,
+            ease: "easeInOut"
+          }}
+          className="absolute bottom-[30%] left-[12%] w-[350px] h-[350px] rounded-full bg-accent-strong/5 blur-[110px]"
+        />
+      </div>
 
       {/* Nav */}
       <header className="sticky top-0 z-50 glass border-b border-line/10 shadow-soft">
@@ -69,6 +151,13 @@ export default function PublicWebsite() {
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none" />
         <div className="absolute inset-0" style={{ background: 'radial-gradient(70rem 45rem at 50% -10%, rgb(var(--accent) / 0.18), transparent 70%)' }} />
 
+        {/* WebGL energy cluster behind the hero text — gradient blobs above remain the loading/low-end fallback */}
+        {enable3D && (
+          <Suspense fallback={null}>
+            <HeroScene />
+          </Suspense>
+        )}
+
         <div className="max-w-6xl mx-auto px-5 text-center relative z-10">
           <motion.div 
             initial={{ scale: 0, rotate: -45 }} 
@@ -87,7 +176,7 @@ export default function PublicWebsite() {
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="inline-flex items-center gap-2 px-3 .5 py-1 rounded-full bg-accent/10 border border-accent/20 mb-6 backdrop-blur"
+            className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-accent/10 border border-accent/20 mb-6 backdrop-blur"
           >
             <span className="h-2 w-2 rounded-full bg-accent animate-pulse" />
             <span className="text-[10px] font-extrabold uppercase tracking-widest text-accent-soft">Club de Football Officiel</span>
@@ -117,7 +206,7 @@ export default function PublicWebsite() {
             transition={{ delay: 0.55 }} 
             className="mt-10 flex flex-wrap gap-4 justify-center"
           >
-            <button onClick={whatsapp} className="btn-primary !px-8 !py-4 shadow-glow flex items-center gap-2 hover:scale-[1.02] transition-transform">
+            <button onClick={whatsappJoin} className="btn-primary !px-8 !py-4 shadow-glow flex items-center gap-2 hover:scale-[1.02] transition-transform">
               <MessageCircle className="h-5 w-5" />Nous rejoindre
             </button>
             <button 
@@ -163,7 +252,7 @@ export default function PublicWebsite() {
             Nos Activités & Formations
           </h2>
           <p className="text-muted mt-3 max-w-xl mx-auto text-sm sm:text-base font-medium">
-            Découvrez nos formations et événements. Les activités défilent automatiquement ci-dessous, passez votre curseur pour figer le défilement.
+            Découvrez nos formations et événements. Cliquez sur n'importe quelle activité pour en voir les détails complets.
           </p>
         </div>
 
@@ -176,14 +265,19 @@ export default function PublicWebsite() {
 
             <div className="flex gap-6 animate-marquee py-4">
               {marqueeItems.map((a, i) => (
-                <motion.div
+                <TiltCard
                   key={`${a.id}-${i}`}
                   whileHover={{ y: -8, scale: 1.01 }}
-                  className="w-[280px] sm:w-[360px] shrink-0 card group overflow-hidden bg-surface-2/40 backdrop-blur-md border border-line/10 hover:border-accent/40 transition-all duration-300 hover:shadow-glow relative"
+                  onClick={() => setSelectedActivity(a)}
+                  className="w-[280px] sm:w-[360px] shrink-0 card group overflow-hidden bg-surface-2/40 backdrop-blur-md border border-line/10 hover:border-accent/40 transition-all duration-300 hover:shadow-glow relative cursor-pointer"
                 >
-                  <div className="h-48 sm:h-52 relative overflow-hidden animate-sheen" style={{ background: activityBg(a.image) }}>
-                    <div className="absolute inset-0 bg-gradient-to-t from-surface to-transparent opacity-90 transition-transform duration-500 group-hover:scale-105" />
-                    <div className="absolute inset-0 bg-accent/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  <div className="h-48 sm:h-52 relative overflow-hidden">
+                    <div 
+                      className="absolute inset-0 transition-transform duration-500 group-hover:scale-110" 
+                      style={{ background: activityBg(a.image) }} 
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/40 to-transparent opacity-90" />
+                    <div className="absolute inset-0 bg-accent/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                     <div className="absolute top-4 left-4 z-10">
                       <span className="chip !bg-black/70 !text-white backdrop-blur border-white/10 uppercase tracking-widest text-[9px] font-bold">Activité</span>
                     </div>
@@ -191,12 +285,18 @@ export default function PublicWebsite() {
                   <div className="p-6 relative z-10">
                     <h3 className="font-display text-lg sm:text-xl font-bold group-hover:text-accent transition-colors duration-300">{a.name}</h3>
                     <p className="text-muted text-xs sm:text-sm mt-2 line-clamp-3 leading-relaxed h-[60px]">{a.description}</p>
-                    <button onClick={whatsapp} className="btn-ghost mt-6 w-full flex items-center justify-center gap-2 group-hover:bg-accent-grad group-hover:text-black group-hover:border-transparent transition-all duration-300">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        whatsappActivity(a.name);
+                      }} 
+                      className="btn-ghost mt-6 w-full flex items-center justify-center gap-2 group-hover:bg-accent-grad group-hover:text-black group-hover:border-transparent transition-all duration-300"
+                    >
                       <MessageCircle className="h-4 w-4" />
                       S'inscrire
                     </button>
                   </div>
-                </motion.div>
+                </TiltCard>
               ))}
             </div>
           </div>
@@ -228,27 +328,38 @@ export default function PublicWebsite() {
             >
               <div className="max-w-6xl mx-auto px-5 grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-16 pb-6">
                 {data.activities.map((a) => (
-                  <motion.div 
-                    key={a.id} 
+                  <TiltCard
+                    key={a.id}
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="card group overflow-hidden bg-surface-2/40 backdrop-blur-md border border-line/10 hover:border-accent/40 transition-all duration-300 hover:shadow-glow"
+                    onClick={() => setSelectedActivity(a)}
+                    className="card group relative overflow-hidden bg-surface-2/40 backdrop-blur-md border border-line/10 hover:border-accent/40 transition-all duration-300 hover:shadow-glow cursor-pointer"
                   >
-                    <div className="h-48 relative overflow-hidden" style={{ background: activityBg(a.image) }}>
-                      <div className="absolute inset-0 bg-gradient-to-t from-surface to-transparent opacity-95 transition-transform duration-500 group-hover:scale-105" />
+                    <div className="h-48 relative overflow-hidden">
+                      <div 
+                        className="absolute inset-0 transition-transform duration-500 group-hover:scale-110" 
+                        style={{ background: activityBg(a.image) }} 
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/40 to-transparent opacity-95" />
                       <div className="absolute top-4 left-4 z-10">
                         <span className="chip !bg-black/70 !text-white backdrop-blur border-white/10 uppercase tracking-widest text-[9px] font-bold">Activité</span>
                       </div>
                     </div>
                     <div className="p-6">
                       <h3 className="font-display text-lg sm:text-xl font-bold group-hover:text-accent transition-colors duration-300">{a.name}</h3>
-                      <p className="text-muted text-xs sm:text-sm mt-2 line-clamp-3 leading-relaxed">{a.description}</p>
-                      <button onClick={whatsapp} className="btn-ghost mt-6 w-full flex items-center justify-center gap-2 group-hover:bg-accent-grad group-hover:text-black group-hover:border-transparent transition-all duration-300">
+                      <p className="text-muted text-xs sm:text-sm mt-2 line-clamp-3 leading-relaxed h-[60px]">{a.description}</p>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          whatsappActivity(a.name);
+                        }} 
+                        className="btn-ghost mt-6 w-full flex items-center justify-center gap-2 group-hover:bg-accent-grad group-hover:text-black group-hover:border-transparent transition-all duration-300"
+                      >
                         <MessageCircle className="h-4 w-4" />
                         S'inscrire
                       </button>
                     </div>
-                  </motion.div>
+                  </TiltCard>
                 ))}
               </div>
             </motion.div>
@@ -261,7 +372,7 @@ export default function PublicWebsite() {
         <div className="absolute -left-16 -bottom-16 h-72 w-72 rounded-full bg-accent-strong/5 blur-3xl pointer-events-none" />
         <div className="absolute -right-16 -top-16 h-72 w-72 rounded-full bg-accent-soft/5 blur-3xl pointer-events-none" />
         
-        <div className="card p-8 sm:p-16 relative overflow-hidden bg-surface-2/20 backdrop-blur-lg border border-line/10 rounded-3xl shadow-soft">
+        <SpotlightCard className="card p-8 sm:p-16 relative overflow-hidden bg-surface-2/20 backdrop-blur-lg border border-line/10 rounded-3xl shadow-soft">
           {/* Decorative grid pattern inside card */}
           <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.01)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.01)_1px,transparent_1px)] bg-[size:3rem_3rem] pointer-events-none" />
           
@@ -314,26 +425,26 @@ export default function PublicWebsite() {
             
             {/* Quick Action Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <button onClick={call} className="group p-8 flex flex-col items-center gap-4 text-center rounded-2xl bg-surface-2/40 border border-line/5 hover:border-accent/40 transition-all duration-500 hover:shadow-glow relative overflow-hidden">
+              <TiltButton onClick={call} className="group p-8 flex flex-col items-center gap-4 text-center rounded-2xl bg-surface-2/40 border border-line/5 hover:border-accent/40 transition-all duration-500 hover:shadow-glow relative overflow-hidden">
                 <div className="absolute inset-0 bg-accent/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <span className="grid h-16 w-16 place-items-center rounded-2xl bg-accent-grad text-black shadow-glow group-hover:scale-110 transition-transform"><Phone className="h-7 w-7" /></span>
                 <div className="relative z-10">
                   <span className="block font-black text-lg tracking-tight">Appeler</span>
                   <span className="block text-xs text-muted font-semibold mt-1">Ligne directe</span>
                 </div>
-              </button>
-              
-              <button onClick={whatsapp} className="group p-8 flex flex-col items-center gap-4 text-center rounded-2xl bg-surface-2/40 border border-line/5 hover:border-accent-strong/40 transition-all duration-500 hover:shadow-glow relative overflow-hidden">
+              </TiltButton>
+
+              <TiltButton onClick={whatsappContact} className="group p-8 flex flex-col items-center gap-4 text-center rounded-2xl bg-surface-2/40 border border-line/5 hover:border-accent-strong/40 transition-all duration-500 hover:shadow-glow relative overflow-hidden">
                 <div className="absolute inset-0 bg-accent-strong/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <span className="grid h-16 w-16 place-items-center rounded-2xl bg-success/20 text-success border border-success/30 group-hover:scale-110 transition-transform"><MessageCircle className="h-7 w-7" /></span>
                 <div className="relative z-10">
                   <span className="block font-black text-lg tracking-tight text-success">WhatsApp</span>
                   <span className="block text-xs text-muted font-semibold mt-1">Chat instantané</span>
                 </div>
-              </button>
+              </TiltButton>
             </div>
           </div>
-        </div>
+        </SpotlightCard>
       </section>
 
       {/* Footer */}
@@ -350,6 +461,86 @@ export default function PublicWebsite() {
         </div>
         <p className="text-xs font-semibold">© {new Date().getFullYear()} {data.club.name}. Tous droits réservés.</p>
       </footer>
+
+      {/* Activity Details Modal */}
+      <AnimatePresence>
+        {selectedActivity && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+            {/* Backdrop Blur Overlay */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedActivity(null)}
+              className="fixed inset-0 bg-black/80 backdrop-blur-md"
+            />
+            
+            {/* Modal Box */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 30 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 30 }}
+              transition={{ type: "spring", duration: 0.5 }}
+              className="relative w-full max-w-2xl bg-surface border border-line/10 rounded-3xl overflow-hidden shadow-2xl z-10 my-8"
+            >
+              {/* Cover Image/Gradient */}
+              <div 
+                className="h-64 sm:h-80 relative flex items-end p-6 sm:p-8" 
+                style={{ background: activityBg(selectedActivity.image) }}
+              >
+                <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/40 to-transparent" />
+                
+                {/* Close Button */}
+                <button
+                  onClick={() => setSelectedActivity(null)}
+                  className="absolute top-4 right-4 z-20 h-10 w-10 rounded-full bg-black/40 hover:bg-black/60 border border-white/10 text-white flex items-center justify-center backdrop-blur hover:scale-105 transition-all"
+                  aria-label="Fermer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+
+                <div className="relative z-10">
+                  <span className="chip !bg-accent !text-black border-transparent uppercase tracking-widest text-[9px] font-extrabold mb-3">
+                    Détails de l'activité
+                  </span>
+                  <h3 className="font-display text-2xl sm:text-4xl font-black text-fg mt-2">
+                    {selectedActivity.name}
+                  </h3>
+                </div>
+              </div>
+
+              {/* Body Content */}
+              <div className="p-6 sm:p-8 space-y-6">
+                <div>
+                  <h4 className="text-xs uppercase font-extrabold text-muted tracking-wider mb-2">Description</h4>
+                  <p className="text-muted text-sm sm:text-base leading-relaxed whitespace-pre-wrap font-medium">
+                    {selectedActivity.description || "Aucune description fournie pour cette activité."}
+                  </p>
+                </div>
+
+                <div className="pt-6 border-t border-line/10 flex flex-col sm:flex-row gap-4">
+                  <button
+                    onClick={() => {
+                      whatsappActivity(selectedActivity.name);
+                      setSelectedActivity(null);
+                    }}
+                    className="btn-primary flex-1 !py-4 shadow-glow flex items-center justify-center gap-3 text-base"
+                  >
+                    <MessageCircle className="h-5 w-5" />
+                    S'inscrire via WhatsApp
+                  </button>
+                  <button
+                    onClick={() => setSelectedActivity(null)}
+                    className="btn-ghost !px-6 !py-4"
+                  >
+                    Fermer
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -13,12 +13,12 @@ import { uid } from '../lib/utils';
 import type { Activity } from '../lib/types';
 
 export const GRADIENTS: Record<string, string> = {
-  'grad-1': 'linear-gradient(135deg,#ff5a00,#ffb900)',
-  'grad-2': 'linear-gradient(135deg,#eb3700,#ff5a00)',
-  'grad-3': 'linear-gradient(135deg,#121214,#ff5a00)',
-  'grad-4': 'linear-gradient(135deg,#ff5a00,#facc15)',
-  'grad-5': 'linear-gradient(135deg,#2e1a05,#ffb900)',
-  'grad-6': 'linear-gradient(135deg,#eb3700,#121214)',
+  'grad-1': 'linear-gradient(135deg,#ff5a00,#ffa03c)',
+  'grad-2': 'linear-gradient(135deg,#c2410c,#ff5a00)',
+  'grad-3': 'linear-gradient(135deg,#141416,#ff5a00)',
+  'grad-4': 'linear-gradient(135deg,#ff7a1f,#ffc27a)',
+  'grad-5': 'linear-gradient(135deg,#28170a,#ff8c33)',
+  'grad-6': 'linear-gradient(135deg,#c2410c,#141416)',
 };
 
 export function activityBg(image: string) {

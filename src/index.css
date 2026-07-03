@@ -6,43 +6,43 @@
 
 /* ============ THEME TOKENS ============ */
 :root {
-  /* Dark (default) — Premium Midnight Blue-Obsidian Dark Theme */
-  --bg: 8 8 16;
-  --surface: 16 16 32;
-  --surface-2: 24 24 48;
-  --surface-3: 36 36 68;
+  /* Dark (default) — Neutral Black / Charcoal / Gray, orange is the only brand hue */
+  --bg: 10 10 11;
+  --surface: 22 22 24;
+  --surface-2: 30 30 33;
+  --surface-3: 40 40 44;
   --line: 255 255 255;      /* used with /opacity for borders */
-  --fg: 244 244 250;
-  --muted: 161 161 185;
-  --faint: 110 110 135;
+  --fg: 245 245 245;
+  --muted: 163 163 168;
+  --faint: 113 113 118;
 
-  /* Neon/Vibrant Coral-Orange & Gold Accent */
-  --accent: 255 95 0;         /* vibrant neon orange */
-  --accent-soft: 255 190 0;   /* vivid athletic gold */
-  --accent-strong: 239 68 68; /* fiery electric crimson */
+  /* Orange-only accent family */
+  --accent: 255 90 0;         /* primary vivid orange */
+  --accent-soft: 255 160 60;  /* lighter amber-orange */
+  --accent-strong: 194 65 12; /* deep burnt orange */
 
   --success: 16 185 129;
   --warning: 245 158 11;
   --danger: 239 68 68;
   --info: 56 189 248;
 
-  --sidebar: 11 11 22;
+  --sidebar: 14 14 16;
 }
 
 .light {
-  /* Elegant Ice-Blue Light Theme */
-  --bg: 243 246 252;
+  /* Clean White / Light-Gray Light Theme — neutral grays, no icy blue */
+  --bg: 246 246 247;
   --surface: 255 255 255;
-  --surface-2: 236 242 250;
-  --surface-3: 224 231 243;
-  --line: 15 20 35;
-  --fg: 20 20 30;
-  --muted: 75 85 105;
-  --faint: 130 145 170;
+  --surface-2: 240 240 242;
+  --surface-3: 229 229 232;
+  --line: 20 20 22;
+  --fg: 22 22 24;
+  --muted: 82 82 88;
+  --faint: 138 138 145;
 
-  --accent: 234 88 12;
-  --accent-soft: 249 115 22;
-  --accent-strong: 194 65 12;
+  --accent: 224 78 0;
+  --accent-soft: 240 120 30;
+  --accent-strong: 178 58 8;
 
   --sidebar: 255 255 255;
 }
@@ -65,7 +65,7 @@ body {
   transition: background-color 0.4s cubic-bezier(0.16, 1, 0.3, 1), color 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Premium ambient backdrop glow */
+/* Ambient backdrop glow — stadium floodlight on black turf: orange + neutral black only */
 body::before {
   content: '';
   position: fixed;
@@ -73,9 +73,15 @@ body::before {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(70rem 45rem at 85% -10%, rgb(var(--accent) / 0.12), transparent 70%),
-    radial-gradient(60rem 45rem at -10% 115%, rgb(var(--accent-strong) / 0.10), transparent 70%),
-    radial-gradient(50rem 50rem at 50% 50%, rgb(124 58 237 / 0.05), transparent 75%); /* subtle royal violet ambient aura */
+    radial-gradient(70rem 45rem at 85% -10%, rgb(var(--accent) / 0.08), transparent 70%),
+    radial-gradient(60rem 45rem at -10% 115%, rgb(var(--accent-strong) / 0.07), transparent 70%),
+    radial-gradient(120rem 70rem at 50% 130%, rgb(0 0 0 / 0.4), transparent 70%);
+}
+
+.light body::before {
+  background:
+    radial-gradient(70rem 45rem at 85% -10%, rgb(var(--accent) / 0.06), transparent 70%),
+    radial-gradient(60rem 45rem at -10% 115%, rgb(var(--accent-strong) / 0.05), transparent 70%);
 }
 
 #root {
@@ -199,7 +205,7 @@ body::before {
   
   /* Continuous Autoplay Marquee Scrolling */
   .animate-marquee {
-    animation: marquee-scroll 45s linear infinite;
+    animation: marquee-scroll 18s linear infinite;
   }
   .animate-marquee:hover {
     animation-play-state: paused;
