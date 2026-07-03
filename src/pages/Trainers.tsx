@@ -14,6 +14,7 @@ import { useLookups } from '../lib/selectors';
 import { usePermissions } from '../lib/permissions';
 import { money, uid, today, fmtDate, daysUntil } from '../lib/utils';
 import { computeUnpaid, monthLabel } from '../lib/staff';
+import { sendClubEmail } from '../lib/email';
 import type { Trainer, MoneyEntry } from '../lib/types';
 
 const empty = { fullName: '', phone: '', email: '', address: '', paymentType: 'month' as 'month' | 'percentage', monthlyAmount: 40000, percentage: 20 };
@@ -315,11 +316,32 @@ export default function Trainers() {
     const expired = data.players.filter((p) => p.assignedSubscription && daysUntil(p.assignedSubscription.expiryDate) < 0);
     const list = [...expired, ...soon];
     const [sel, setSel] = useState<string[]>(list.map((p) => p.id));
+    const [sending, setSending] = useState(false);
     const toggle = (id: string) => setSel((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
-    const send = () => { toast(`${sel.length} e-mail(s) (PDF) envoyé(s) aux joueurs et parents`, 'success'); onClose(); };
+    const send = async () => {
+      setSending(true);
+      let ok = 0, fail = 0;
+      for (const id of sel) {
+        const p = list.find((x) => x.id === id);
+        if (!p?.assignedSubscription) continue;
+        const parent = p.parentId ? L.par[p.parentId] : undefined;
+        const recipients = [
+          p.email ? { email: p.email, name: L.playerName(p) } : null,
+          parent?.email ? { email: parent.email, name: `${parent.firstName} ${parent.lastName}` } : null,
+        ].filter((r): r is { email: string; name: string } => !!r);
+        if (recipients.length === 0) continue;
+        const d = daysUntil(p.assignedSubscription.expiryDate);
+        const status = d < 0 ? `expiré depuis ${-d}j` : `expire dans ${d}j`;
+        const html = `<p>Bonjour,</p><p>L'abonnement de ${L.playerName(p)} (${status}, échéance ${fmtDate(p.assignedSubscription.expiryDate)}) nécessite votre attention.</p>`;
+        try { await sendClubEmail(data.club, recipients, t('trainers.notifyExpiry'), html); ok++; } catch { fail++; }
+      }
+      setSending(false);
+      toast(fail === 0 ? `${ok} e-mail(s) envoyé(s)` : `${ok} envoyé(s), ${fail} échoué(s)`, fail === 0 ? 'success' : 'error');
+      onClose();
+    };
     return (
       <Modal open onClose={onClose} size="lg" title={t('trainers.notifyExpiry')} subtitle="Abonnements expirés & bientôt expirés"
-        footer={<><button onClick={onClose} className="btn-ghost">{t('common.cancel')}</button><button onClick={send} className="btn-primary" disabled={!sel.length}><Mail className="h-4 w-4" />{t('common.send')} ({sel.length})</button></>}>
+        footer={<><button onClick={onClose} className="btn-ghost">{t('common.cancel')}</button><button onClick={send} className="btn-primary" disabled={!sel.length || sending}><Mail className="h-4 w-4" />{sending ? '…' : `${t('common.send')} (${sel.length})`}</button></>}>
         <div className="space-y-2 max-h-[55vh] overflow-y-auto">
           {list.length === 0 && <EmptyState title="Aucun abonnement à notifier" icon={<Bell className="h-7 w-7" />} />}
           {list.map((p) => { const d = daysUntil(p.assignedSubscription!.expiryDate); const on = sel.includes(p.id); return (

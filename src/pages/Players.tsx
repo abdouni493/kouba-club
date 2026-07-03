@@ -16,6 +16,7 @@ import { useScan } from '../components/scan/ScanCenter';
 import { useLookups } from '../lib/selectors';
 import { usePermissions } from '../lib/permissions';
 import { money, uid, today, fmtDate, addDays, daysUntil } from '../lib/utils';
+import { sendClubEmail } from '../lib/email';
 import type { Player, AssignedSubscription } from '../lib/types';
 
 const emptyPlayer = { firstName: '', lastName: '', birthDate: '', birthPlace: '', phone: '', email: '', parentId: '' };
@@ -405,12 +406,31 @@ export default function Players() {
 
   function EmailAskModal({ player, onClose }: { player: Player; onClose: () => void }) {
     const parent = player.parentId ? L.par[player.parentId] : undefined;
-    const send = () => { toast(`E-mail (PDF) envoyé depuis ${data.club.email}`, 'success'); onClose(); };
+    const [sending, setSending] = useState(false);
+    const send = async () => {
+      const recipients = [
+        player.email ? { email: player.email, name: `${player.firstName} ${player.lastName}` } : null,
+        parent?.email ? { email: parent.email, name: `${parent.firstName} ${parent.lastName}` } : null,
+      ].filter((r): r is { email: string; name: string } => !!r);
+      if (recipients.length === 0) return;
+      setSending(true);
+      try {
+        const a = player.assignedSubscription;
+        const html = `<p>Bonjour,</p><p>Confirmation d'abonnement pour ${player.firstName} ${player.lastName}${a ? ` : ${L.timingName(a.timingId)} — ${money(a.price)} (exp. ${fmtDate(a.expiryDate)})` : ''}.</p>`;
+        await sendClubEmail(data.club, recipients, t('players.sendMail'), html);
+        toast('E-mail envoyé', 'success');
+        onClose();
+      } catch (err) {
+        toast(err instanceof Error ? err.message : 'Échec de l\'envoi', 'error');
+      } finally {
+        setSending(false);
+      }
+    };
     return (
       <Modal open onClose={onClose} size="md" title={t('players.sendMail')} subtitle="Confirmation d'abonnement">
         <div className="text-center py-2">
           <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-accent/15 text-accent mb-4"><Mail className="h-7 w-7" /></div>
-          <p className="text-fg font-semibold">Envoyer la confirmation par e-mail (PDF) ?</p>
+          <p className="text-fg font-semibold">Envoyer la confirmation par e-mail ?</p>
           <p className="text-sm text-muted mt-2">Destinataires :</p>
           <div className="mt-2 space-y-1 text-sm">
             {player.email && <p className="text-fg">{player.email} <span className="text-muted">(joueur)</span></p>}
@@ -419,7 +439,7 @@ export default function Players() {
           </div>
           <div className="flex gap-3 mt-6">
             <button onClick={onClose} className="btn-ghost flex-1"><X className="h-4 w-4" />{t('common.no')}</button>
-            <button onClick={send} className="btn-primary flex-1" disabled={!player.email && !parent?.email}><Check className="h-4 w-4" />{t('common.send')}</button>
+            <button onClick={send} className="btn-primary flex-1" disabled={sending || (!player.email && !parent?.email)}><Check className="h-4 w-4" />{sending ? '…' : t('common.send')}</button>
           </div>
         </div>
       </Modal>

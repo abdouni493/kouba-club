@@ -10,6 +10,7 @@ import { useToast } from '../context/ToastContext';
 import { useLookups } from '../lib/selectors';
 import { usePermissions } from '../lib/permissions';
 import { money, uid, fmtDate } from '../lib/utils';
+import { sendClubEmail } from '../lib/email';
 import type { Parent } from '../lib/types';
 
 const empty = { firstName: '', lastName: '', phone: '', address: '', email: '', playerIds: [] as string[] };
@@ -159,14 +160,30 @@ export default function Parents() {
     const [mode, setMode] = useState<'report' | 'message'>('report');
     const [lastOnly, setLastOnly] = useState(false);
     const [message, setMessage] = useState('');
-    const send = () => {
+    const [sending, setSending] = useState(false);
+    const send = async () => {
       if (!parent.email) { toast('Ce parent n\'a pas d\'e-mail', 'error'); return; }
-      toast(`${mode === 'report' ? 'Rapport' : 'Message'} (PDF) envoyé à ${parent.email}`, 'success');
-      onClose();
+      setSending(true);
+      try {
+        const rows = parent.playerIds
+          .map((id) => L.pl[id])
+          .filter((pl): pl is NonNullable<typeof pl> => !!pl?.assignedSubscription)
+          .slice(0, lastOnly ? 1 : undefined);
+        const html = mode === 'report'
+          ? `<p>Bonjour ${parent.firstName},</p><p>Voici le rapport d'abonnement :</p><ul>${rows.map((pl) => `<li>${pl.firstName} — ${L.timingName(pl.assignedSubscription!.timingId)} — ${money(pl.assignedSubscription!.price)} (exp. ${fmtDate(pl.assignedSubscription!.expiryDate)})</li>`).join('')}</ul>`
+          : `<p>Bonjour ${parent.firstName},</p><p>${message.replace(/\n/g, '<br/>')}</p>`;
+        await sendClubEmail(data.club, [{ email: parent.email, name: `${parent.firstName} ${parent.lastName}` }], mode === 'report' ? t('parents.sendReport') : t('parents.specialMessage'), html);
+        toast(`${mode === 'report' ? 'Rapport' : 'Message'} envoyé à ${parent.email}`, 'success');
+        onClose();
+      } catch (err) {
+        toast(err instanceof Error ? err.message : 'Échec de l\'envoi', 'error');
+      } finally {
+        setSending(false);
+      }
     };
     return (
       <Modal open onClose={onClose} size="md" title={t('parents.sendReport')} subtitle={`${parent.firstName} ${parent.lastName}`}
-        footer={<><button onClick={onClose} className="btn-ghost">{t('common.cancel')}</button><button onClick={send} className="btn-primary"><Mail className="h-4 w-4" />{t('common.send')}</button></>}>
+        footer={<><button onClick={onClose} className="btn-ghost">{t('common.cancel')}</button><button onClick={send} className="btn-primary" disabled={sending}><Mail className="h-4 w-4" />{sending ? '…' : t('common.send')}</button></>}>
         <div className="space-y-4">
           <Segmented value={mode} onChange={setMode} options={[{ value: 'report', label: t('parents.sendReport') }, { value: 'message', label: t('parents.specialMessage') }]} />
           {mode === 'report' ? (
@@ -185,7 +202,7 @@ export default function Parents() {
           ) : (
             <Textarea label={t('parents.specialMessage')} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Votre message…" />
           )}
-          <p className="text-xs text-faint">Envoyé depuis {data.club.email} · PDF aux couleurs du club</p>
+          <p className="text-xs text-faint">Envoyé depuis {data.club.email || '—'}</p>
         </div>
       </Modal>
     );
