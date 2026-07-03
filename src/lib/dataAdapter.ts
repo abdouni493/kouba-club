@@ -39,6 +39,23 @@ const NAME_ONLY: ReadonlySet<Collections> = new Set([
   'categories', 'groups', 'sports', 'stadiums', 'roles', 'expenseCategories',
 ]);
 
+// Mirrors the `on delete set null` foreign keys in supabase/schema.sql. When a row in one
+// of these collections is deleted, Postgres nulls the referencing column server-side, but
+// the client's in-memory cache doesn't know that — so a later edit of the (now-orphaned)
+// dependent row would resend the stale id and fail with a foreign-key violation. Applied
+// locally after a successful delete in DataContext.remove() to keep the cache consistent.
+export const CASCADE_SET_NULL: Partial<Record<Collections, { collection: Collections; field: string }[]>> = {
+  categories: [{ collection: 'timings', field: 'categoryId' }],
+  groups: [{ collection: 'timings', field: 'groupId' }],
+  sports: [{ collection: 'timings', field: 'sportId' }],
+  stadiums: [{ collection: 'timings', field: 'stadiumId' }],
+  trainers: [{ collection: 'timings', field: 'trainerId' }],
+  timings: [{ collection: 'subscriptions', field: 'timingId' }],
+  parents: [{ collection: 'players', field: 'parentId' }],
+  roles: [{ collection: 'workers', field: 'roleId' }],
+  expenseCategories: [{ collection: 'expenses', field: 'categoryId' }],
+};
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
@@ -93,7 +110,7 @@ function mapPlayer(r: Row, paymentRows: Row[]): Player {
     id: r.id, firstName: r.first_name, lastName: r.last_name, birthDate: r.birth_date || '',
     birthPlace: r.birth_place || '', phone: r.phone || '', email: r.email || '',
     parentId: r.parent_id || undefined, createdAt: r.created_at, subscriptionCostPaid: r.subscription_cost_paid,
-    photoUrl: r.photo_url || '', assignedSubscription,
+    assignedSubscription,
     payments: paymentRows.filter((p) => p.player_id === r.id).map(mapPlayerPayment),
   };
 }
@@ -330,7 +347,7 @@ export async function insertRow<K extends Collections>(key: K, item: AppData[K][
       await checkErr(supabase.from('players').insert({
         id: p.id, first_name: p.firstName, last_name: p.lastName, birth_date: p.birthDate || null,
         birth_place: p.birthPlace, phone: p.phone, email: p.email, parent_id: p.parentId || null,
-        created_at: p.createdAt, subscription_cost_paid: p.subscriptionCostPaid, photo_url: p.photoUrl || '',
+        created_at: p.createdAt, subscription_cost_paid: p.subscriptionCostPaid,
         sub_subscription_id: a?.subscriptionId ?? null, sub_timing_id: a?.timingId ?? null,
         sub_start_date: a?.startDate ?? null, sub_expiry_date: a?.expiryDate ?? null,
         sub_price: a?.price ?? null, sub_amount_paid: a?.amountPaid ?? null, sub_rest: a?.rest ?? null,
@@ -450,7 +467,6 @@ export async function updateRow<K extends Collections>(key: K, id: string, patch
       if (p.email !== undefined) cols.email = p.email;
       if ('parentId' in p) cols.parent_id = p.parentId || null;
       if (p.subscriptionCostPaid !== undefined) cols.subscription_cost_paid = p.subscriptionCostPaid;
-      if ('photoUrl' in p) cols.photo_url = p.photoUrl || '';
       if ('assignedSubscription' in p) {
         const a = p.assignedSubscription;
         cols.sub_subscription_id = a?.subscriptionId ?? null;

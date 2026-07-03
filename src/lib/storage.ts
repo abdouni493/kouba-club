@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 
-export type ImageBucket = 'club-logo' | 'activity-images' | 'player-photos';
+export type ImageBucket = 'club-logo' | 'activity-images';
 
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 

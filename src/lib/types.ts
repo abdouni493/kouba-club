@@ -76,7 +76,6 @@ export interface Player {
   parentId?: string;
   createdAt: string;
   subscriptionCostPaid: boolean; // one-time registration fee paid or not
-  photoUrl?: string; // Supabase Storage public URL (player-photos bucket)
   assignedSubscription?: AssignedSubscription;
   payments: Payment[];
 }

@@ -171,7 +171,6 @@ create table if not exists public.players (
   parent_id              text references public.parents(id) on delete set null,
   created_at             date not null default current_date,
   subscription_cost_paid boolean not null default false,
-  photo_url              text not null default '',
   -- flattened "assignedSubscription" (nullable = no active subscription)
   sub_subscription_id    text references public.subscriptions(id) on delete set null,
   sub_timing_id          text references public.timings(id) on delete set null,
@@ -733,11 +732,10 @@ create policy worker_payments_write on public.worker_payments for all to authent
 insert into storage.buckets (id, name, public)
 values
   ('club-logo', 'club-logo', true),
-  ('activity-images', 'activity-images', true),
-  ('player-photos', 'player-photos', true)
+  ('activity-images', 'activity-images', true)
 on conflict (id) do nothing;
 
--- public read on all three buckets (needed for <img> tags + public website)
+-- public read on both buckets (needed for <img> tags + public website)
 drop policy if exists "club-logo public read" on storage.objects;
 create policy "club-logo public read" on storage.objects for select
   using (bucket_id = 'club-logo');
@@ -745,10 +743,6 @@ create policy "club-logo public read" on storage.objects for select
 drop policy if exists "activity-images public read" on storage.objects;
 create policy "activity-images public read" on storage.objects for select
   using (bucket_id = 'activity-images');
-
-drop policy if exists "player-photos public read" on storage.objects;
-create policy "player-photos public read" on storage.objects for select
-  using (bucket_id = 'player-photos');
 
 -- writes gated by the same page permissions as the data they belong to
 drop policy if exists "club-logo write" on storage.objects;
@@ -770,16 +764,6 @@ create policy "activity-images update" on storage.objects for update to authenti
 drop policy if exists "activity-images delete" on storage.objects;
 create policy "activity-images delete" on storage.objects for delete to authenticated
   using (bucket_id = 'activity-images' and public.can_write('website'));
-
-drop policy if exists "player-photos write" on storage.objects;
-create policy "player-photos write" on storage.objects for insert to authenticated
-  with check (bucket_id = 'player-photos' and public.can_write('players'));
-drop policy if exists "player-photos update" on storage.objects;
-create policy "player-photos update" on storage.objects for update to authenticated
-  using (bucket_id = 'player-photos' and public.can_write('players'));
-drop policy if exists "player-photos delete" on storage.objects;
-create policy "player-photos delete" on storage.objects for delete to authenticated
-  using (bucket_id = 'player-photos' and public.can_write('players'));
 
 -- =============================================================================
 -- 7. SEED DATA — sample club data matching the original demo

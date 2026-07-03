@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import type { AppData } from '../lib/mockData';
 import {
   emptyAppData, fetchAllData, fetchPublicData, insertRow, updateRow, deleteRow,
-  upsertClub, upsertContact, type Collections,
+  upsertClub, upsertContact, CASCADE_SET_NULL, type Collections,
 } from '../lib/dataAdapter';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
@@ -97,7 +97,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
     remove: (key, id) => {
       const prev = (dataRef.current[key] as { id: string }[]).find((x) => x.id === id);
       setData((d) => ({ ...d, [key]: (d[key] as { id: string }[]).filter((it) => it.id !== id) } as AppData));
-      return deleteRow(key, id).catch((err) => {
+      return deleteRow(key, id).then(() => {
+        // Mirror the DB's `on delete set null` so cached dependents don't resend a dangling id later.
+        const cascades = CASCADE_SET_NULL[key];
+        if (!cascades) return;
+        setData((d) => {
+          let next = d;
+          for (const c of cascades) {
+            next = {
+              ...next,
+              [c.collection]: (next[c.collection] as unknown as Record<string, unknown>[]).map((it) =>
+                it[c.field] === id ? { ...it, [c.field]: undefined } : it,
+              ),
+            } as AppData;
+          }
+          return next;
+        });
+      }).catch((err) => {
         console.error(err);
         toast(`Erreur de suppression : ${err.message}`, 'error');
         if (prev) setData((d) => ({ ...d, [key]: [prev, ...(d[key] as unknown[])] } as AppData));

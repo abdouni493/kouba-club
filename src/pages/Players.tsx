@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
@@ -15,7 +15,6 @@ import { useToast } from '../context/ToastContext';
 import { useScan } from '../components/scan/ScanCenter';
 import { useLookups } from '../lib/selectors';
 import { usePermissions } from '../lib/permissions';
-import { uploadImage } from '../lib/storage';
 import { money, uid, today, fmtDate, addDays, daysUntil } from '../lib/utils';
 import type { Player, AssignedSubscription } from '../lib/types';
 
@@ -348,8 +347,9 @@ export default function Players() {
 
   function CardPrintModal({ p, onClose }: { p: Player; onClose: () => void }) {
     const [type, setType] = useState<'qr' | 'barcode'>('qr');
-    const [photo, setPhoto] = useState<string>(p.photoUrl || '');
-    const [uploadingPhoto, setUploadingPhoto] = useState(false);
+    const [photo, setPhoto] = useState<string>('');
+    // Object URL is local-only (never uploaded/saved) — revoke it on unmount to avoid leaking memory.
+    useEffect(() => () => { if (photo) URL.revokeObjectURL(photo); }, [photo]);
     const doPrint = () => {
       document.body.classList.add('printing-card');
       const cleanup = () => { document.body.classList.remove('printing-card'); window.removeEventListener('afterprint', cleanup); };
@@ -357,18 +357,11 @@ export default function Players() {
       window.print();
       setTimeout(cleanup, 1200);
     };
-    const onPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const onPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]; if (!file) return;
-      setUploadingPhoto(true);
-      try {
-        const url = await uploadImage('player-photos', file);
-        setPhoto(url);
-        updateItem('players', p.id, { photoUrl: url });
-      } catch (err) {
-        toast(err instanceof Error ? err.message : 'Erreur de téléversement', 'error');
-      } finally {
-        setUploadingPhoto(false);
-      }
+      if (!file.type.startsWith('image/')) { toast('Le fichier doit être une image', 'error'); return; }
+      if (photo) URL.revokeObjectURL(photo);
+      setPhoto(URL.createObjectURL(file));
     };
     return (
       <Modal open onClose={onClose} size="lg" title={t('players.printCard')} subtitle={L.playerName(p)}
@@ -378,7 +371,7 @@ export default function Players() {
             <button onClick={() => setType('qr')} className={`px-4 py-1.5 text-sm font-semibold rounded-lg ${type === 'qr' ? 'bg-accent-grad text-black' : 'text-muted'}`}>{t('players.qr')}</button>
             <button onClick={() => setType('barcode')} className={`px-4 py-1.5 text-sm font-semibold rounded-lg ${type === 'barcode' ? 'bg-accent-grad text-black' : 'text-muted'}`}>{t('players.barcode')}</button>
           </div>
-          <label className="btn-ghost cursor-pointer"><Upload className="h-4 w-4" />{uploadingPhoto ? 'Envoi…' : t('players.uploadPhoto')}<input type="file" accept="image/*" className="hidden" onChange={onPhoto} disabled={uploadingPhoto} /></label>
+          <label className="btn-ghost cursor-pointer"><Upload className="h-4 w-4" />{t('players.uploadPhoto')}<input type="file" accept="image/*" className="hidden" onChange={onPhoto} /></label>
         </div>
 
         <div className="flex justify-center">
