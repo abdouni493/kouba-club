@@ -2,10 +2,12 @@ import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 
 import * as THREE from 'three';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Float, Sparkles } from '@react-three/drei';
+import { ConvexGeometry } from 'three-stdlib';
 
-/* Lazy-loaded WebGL hero backdrop: an abstract orange "energy" cluster (particle shell +
-   wireframe icosahedrons) behind the club name. Colors come from the live CSS variables so
-   dark/light theme and future rebranding retint the scene automatically. */
+/* Lazy-loaded WebGL hero backdrop: slowly spinning wireframe footballs (true truncated
+   icosahedrons — the classic hexagon/pentagon ball) inside an orange particle field.
+   Colors come from the live CSS variables so dark/light theme and any future rebranding
+   retint the scene automatically. `lite` trims counts and sizes for phones. */
 
 function cssRgb(name: string, fallback: [number, number, number]) {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -35,6 +37,85 @@ function useTheme() {
   return theme;
 }
 
+/* Unit-radius truncated icosahedron seams: the 60 vertices are the cyclic permutations of
+   (0, ±1, ±3φ), (±1, ±(2+φ), ±2φ), (±2, ±(1+2φ), ±φ); the convex hull's hard edges are
+   exactly the hexagon/pentagon panel seams of a football. Built once and shared. */
+let footballSeams: THREE.EdgesGeometry | null = null;
+function getFootballSeams() {
+  if (footballSeams) return footballSeams;
+  const PHI = (1 + Math.sqrt(5)) / 2;
+  const base = [
+    [0, 1, 3 * PHI],
+    [1, 2 + PHI, 2 * PHI],
+    [2, 1 + 2 * PHI, PHI],
+  ];
+  const seen = new Set<string>();
+  const points: THREE.Vector3[] = [];
+  for (const [a, b, c] of base) {
+    for (const [x, y, z] of [[a, b, c], [b, c, a], [c, a, b]]) {
+      for (const sx of [1, -1]) for (const sy of [1, -1]) for (const sz of [1, -1]) {
+        const v = new THREE.Vector3(x * sx, y * sy, z * sz);
+        const key = v.toArray().map((n) => n.toFixed(3)).join(',');
+        if (!seen.has(key)) {
+          seen.add(key);
+          points.push(v);
+        }
+      }
+    }
+  }
+  const scale = 1 / points[0].length();
+  for (const p of points) p.multiplyScalar(scale);
+  footballSeams = new THREE.EdgesGeometry(new ConvexGeometry(points), 10);
+  return footballSeams;
+}
+
+function Football({
+  radius,
+  position,
+  spin,
+  seamColor,
+  theme,
+  animate,
+}: {
+  radius: number;
+  position: [number, number, number];
+  spin: number;
+  seamColor: THREE.Color;
+  theme: Theme;
+  animate: boolean;
+}) {
+  const ball = useRef<THREE.Group>(null);
+  const seams = useMemo(getFootballSeams, []);
+
+  useFrame((_, delta) => {
+    if (!animate || !ball.current) return;
+    ball.current.rotation.y += delta * spin;
+    ball.current.rotation.x += delta * spin * 0.35;
+  });
+
+  return (
+    <Float speed={animate ? 1.3 : 0} rotationIntensity={0.25} floatIntensity={0.7}>
+      <group position={position}>
+        <group ref={ball} scale={radius}>
+          {/* solid body occludes the rear seams so it reads as a ball, not a cage */}
+          <mesh>
+            <sphereGeometry args={[0.985, 28, 20]} />
+            <meshBasicMaterial color={theme.isLight ? '#ffffff' : '#151517'} />
+          </mesh>
+          <lineSegments geometry={seams}>
+            <lineBasicMaterial
+              color={seamColor}
+              transparent
+              opacity={theme.isLight ? 0.8 : 0.9}
+              blending={theme.isLight ? THREE.NormalBlending : THREE.AdditiveBlending}
+            />
+          </lineSegments>
+        </group>
+      </group>
+    </Float>
+  );
+}
+
 function ParallaxRig({ animate }: { animate: boolean }) {
   const pointer = useRef({ x: 0, y: 0 });
 
@@ -60,17 +141,15 @@ function ParallaxRig({ animate }: { animate: boolean }) {
   return null;
 }
 
-const PARTICLE_COUNT = 380;
-
-function EnergyCluster({ theme, animate }: { theme: Theme; animate: boolean }) {
+function EnergyField({ theme, animate, lite }: { theme: Theme; animate: boolean; lite: boolean }) {
   const group = useRef<THREE.Group>(null);
-  /* Additive glow reads well on black; on the light theme it washes toward white, so fall back to normal blending. */
   const blending = theme.isLight ? THREE.NormalBlending : THREE.AdditiveBlending;
+  const count = lite ? 220 : 380;
 
   const positions = useMemo(() => {
-    const arr = new Float32Array(PARTICLE_COUNT * 3);
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      // hollow, vertically squashed sphere shell — abstract energy cloud, not a literal ball
+    const arr = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      // hollow, vertically squashed sphere shell around the footballs
       const radius = 2.1 + Math.random() * 1.4;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
@@ -79,7 +158,7 @@ function EnergyCluster({ theme, animate }: { theme: Theme; animate: boolean }) {
       arr[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta) * 0.8;
     }
     return arr;
-  }, []);
+  }, [count]);
 
   useFrame((state, delta) => {
     if (!animate || !group.current) return;
@@ -89,7 +168,7 @@ function EnergyCluster({ theme, animate }: { theme: Theme; animate: boolean }) {
 
   return (
     <group ref={group}>
-      <points>
+      <points key={count}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[positions, 3]} />
         </bufferGeometry>
@@ -103,29 +182,9 @@ function EnergyCluster({ theme, animate }: { theme: Theme; animate: boolean }) {
           blending={blending}
         />
       </points>
-
-      <Float speed={animate ? 1.2 : 0} rotationIntensity={0.5} floatIntensity={0.6}>
-        <mesh position={[0, 0.1, 0]}>
-          <icosahedronGeometry args={[1.15, 0]} />
-          <meshBasicMaterial color={theme.accent} wireframe transparent opacity={theme.isLight ? 0.35 : 0.5} depthWrite={false} blending={blending} />
-        </mesh>
-      </Float>
-      <Float speed={animate ? 1.6 : 0} rotationIntensity={0.7} floatIntensity={0.8}>
-        <mesh position={[-2.3, 0.5, -0.7]}>
-          <icosahedronGeometry args={[0.55, 0]} />
-          <meshBasicMaterial color={theme.strong} wireframe transparent opacity={theme.isLight ? 0.4 : 0.55} depthWrite={false} blending={blending} />
-        </mesh>
-      </Float>
-      <Float speed={animate ? 1.4 : 0} rotationIntensity={0.6} floatIntensity={0.7}>
-        <mesh position={[2.4, -0.45, -0.9]}>
-          <icosahedronGeometry args={[0.4, 0]} />
-          <meshBasicMaterial color={theme.soft} wireframe transparent opacity={theme.isLight ? 0.4 : 0.55} depthWrite={false} blending={blending} />
-        </mesh>
-      </Float>
-
       <Sparkles
-        count={70}
-        scale={[7, 3.2, 4]}
+        count={lite ? 40 : 70}
+        scale={lite ? [4, 3.2, 4] : [7, 3.2, 4]}
         size={2.2}
         speed={animate ? 0.35 : 0}
         color={theme.isLight ? theme.strong : theme.soft}
@@ -145,7 +204,7 @@ class SceneErrorBoundary extends Component<{ children: ReactNode }, { failed: bo
   }
 }
 
-export default function HeroScene() {
+export default function HeroScene({ lite = false }: { lite?: boolean }) {
   const wrapper = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState(true);
   const [reduce] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -166,13 +225,31 @@ export default function HeroScene() {
       <SceneErrorBoundary>
         <Canvas
           frameloop={animate ? 'always' : 'demand'}
-          dpr={[1, 1.5]}
+          dpr={lite ? [1, 1.25] : [1, 1.5]}
           camera={{ position: [0, 0, 6], fov: 45 }}
           gl={{ alpha: true, antialias: false, powerPreference: 'default' }}
           style={{ background: 'transparent' }}
         >
           <ParallaxRig animate={animate} />
-          <EnergyCluster theme={theme} animate={animate} />
+          <EnergyField theme={theme} animate={animate} lite={lite} />
+          <Football radius={1.25} position={[0, 0.15, 0]} spin={0.15} seamColor={theme.accent} theme={theme} animate={animate} />
+          {/* side balls hug the center column on phones so they stay in frame */}
+          <Football
+            radius={0.55}
+            position={lite ? [-1.35, 1.7, -1] : [-2.5, 0.6, -0.9]}
+            spin={0.3}
+            seamColor={theme.strong}
+            theme={theme}
+            animate={animate}
+          />
+          <Football
+            radius={0.45}
+            position={lite ? [1.4, -1.8, -0.9] : [2.5, -0.5, -1.1]}
+            spin={0.25}
+            seamColor={theme.accent}
+            theme={theme}
+            animate={animate}
+          />
         </Canvas>
       </SceneErrorBoundary>
     </div>

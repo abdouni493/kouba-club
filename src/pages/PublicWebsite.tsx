@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Phone, MessageCircle, Mail, MapPin, ArrowRight, ArrowLeft, Share2, Sparkles, X } from 'lucide-react';
+import { Trophy, Phone, MessageCircle, Mail, MapPin, ArrowRight, ArrowLeft, Share2, Sparkles, X, Info } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { TiltCard, TiltButton, SpotlightCard } from '../components/ui/Tilt';
 import { activityBg } from './WebsiteManagement';
@@ -10,14 +10,15 @@ import type { Activity } from '../lib/types';
 // Code-split the WebGL hero so three.js never blocks first paint
 const HeroScene = lazy(() => import('../components/3d/HeroScene'));
 
-// Skip WebGL entirely on small/low-end devices — the CSS gradient blobs remain as the backdrop
+// Skip WebGL only where it can't run: no WebGL, data-saver on, or very low memory.
+// Phones get the scene too, in a trimmed "lite" variant; CSS gradient blobs remain the fallback.
 function canRun3D() {
   if (typeof window === 'undefined') return false;
-  const cores = navigator.hardwareConcurrency ?? 4;
-  const memory = (navigator as { deviceMemory?: number }).deviceMemory ?? 4;
+  const nav = navigator as Navigator & { deviceMemory?: number; connection?: { saveData?: boolean } };
+  if (nav.connection?.saveData) return false;
+  if ((nav.deviceMemory ?? 4) < 2) return false;
   const canvas = document.createElement('canvas');
-  const webgl = !!(canvas.getContext('webgl2') || canvas.getContext('webgl'));
-  return webgl && cores >= 4 && memory >= 4 && window.innerWidth >= 640;
+  return !!(canvas.getContext('webgl2') || canvas.getContext('webgl'));
 }
 
 export default function PublicWebsite() {
@@ -26,6 +27,7 @@ export default function PublicWebsite() {
   const [showGrid, setShowGrid] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [enable3D] = useState(canRun3D);
+  const [lite3D] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
   const c = data.contact;
 
   const call = () => c.phone && (window.location.href = `tel:${c.phone}`);
@@ -151,10 +153,10 @@ export default function PublicWebsite() {
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none" />
         <div className="absolute inset-0" style={{ background: 'radial-gradient(70rem 45rem at 50% -10%, rgb(var(--accent) / 0.18), transparent 70%)' }} />
 
-        {/* WebGL energy cluster behind the hero text — gradient blobs above remain the loading/low-end fallback */}
+        {/* WebGL footballs behind the hero text — gradient blobs above remain the loading/low-end fallback */}
         {enable3D && (
           <Suspense fallback={null}>
-            <HeroScene />
+            <HeroScene lite={lite3D} />
           </Suspense>
         )}
 
@@ -206,12 +208,12 @@ export default function PublicWebsite() {
             transition={{ delay: 0.55 }} 
             className="mt-10 flex flex-wrap gap-4 justify-center"
           >
-            <button onClick={whatsappJoin} className="btn-primary !px-8 !py-4 shadow-glow flex items-center gap-2 hover:scale-[1.02] transition-transform">
+            <button onClick={whatsappJoin} className="btn-primary !px-8 !py-4 shadow-glow flex items-center justify-center gap-2 hover:scale-[1.02] transition-transform w-full sm:w-auto">
               <MessageCircle className="h-5 w-5" />Nous rejoindre
             </button>
-            <button 
-              onClick={() => document.getElementById('activities')?.scrollIntoView({ behavior: 'smooth' })} 
-              className="btn-ghost !px-8 !py-4 hover:shadow-soft flex items-center gap-2"
+            <button
+              onClick={() => document.getElementById('activities')?.scrollIntoView({ behavior: 'smooth' })}
+              className="btn-ghost !px-8 !py-4 hover:shadow-soft flex items-center justify-center gap-2 w-full sm:w-auto"
             >
               Nos activités <ArrowRight className="h-4 w-4" />
             </button>
@@ -227,7 +229,7 @@ export default function PublicWebsite() {
             {[['+250', 'Joueurs actifs'], ['15+', 'Années d\'excellence'], ['3', 'Terrains pros']].map(([n, l]) => (
               <div 
                 key={l} 
-                className="p-5 rounded-2xl bg-surface-2/30 backdrop-blur-md border border-line/5 flex flex-col justify-center items-center shadow-card hover:border-accent/20 transition-all duration-300 group"
+                className="p-5 rounded-2xl bg-surface-2/60 backdrop-blur-md border border-line/5 flex flex-col justify-center items-center shadow-card hover:border-accent/20 transition-all duration-300 group"
               >
                 <p className="font-display text-3xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-accent-soft via-accent to-accent-strong tracking-tight group-hover:scale-105 transition-transform duration-300">
                   {n}
@@ -285,16 +287,26 @@ export default function PublicWebsite() {
                   <div className="p-6 relative z-10">
                     <h3 className="font-display text-lg sm:text-xl font-bold group-hover:text-accent transition-colors duration-300">{a.name}</h3>
                     <p className="text-muted text-xs sm:text-sm mt-2 line-clamp-3 leading-relaxed h-[60px]">{a.description}</p>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        whatsappActivity(a.name);
-                      }} 
-                      className="btn-ghost mt-6 w-full flex items-center justify-center gap-2 group-hover:bg-accent-grad group-hover:text-black group-hover:border-transparent transition-all duration-300"
-                    >
-                      <MessageCircle className="h-4 w-4" />
-                      S'inscrire
-                    </button>
+                    <div className="mt-6 flex gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          whatsappActivity(a.name);
+                        }}
+                        className="btn-ghost flex-1 flex items-center justify-center gap-2 group-hover:bg-accent-grad group-hover:text-black group-hover:border-transparent transition-all duration-300"
+                      >
+                        <MessageCircle className="h-4 w-4" />
+                        S'inscrire
+                      </button>
+                      <button
+                        onClick={() => setSelectedActivity(a)}
+                        className="btn-ghost !px-3.5 hover:text-accent hover:border-accent/40"
+                        aria-label="Voir les détails"
+                        title="Voir les détails"
+                      >
+                        <Info className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 </TiltCard>
               ))}
@@ -348,16 +360,26 @@ export default function PublicWebsite() {
                     <div className="p-6">
                       <h3 className="font-display text-lg sm:text-xl font-bold group-hover:text-accent transition-colors duration-300">{a.name}</h3>
                       <p className="text-muted text-xs sm:text-sm mt-2 line-clamp-3 leading-relaxed h-[60px]">{a.description}</p>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          whatsappActivity(a.name);
-                        }} 
-                        className="btn-ghost mt-6 w-full flex items-center justify-center gap-2 group-hover:bg-accent-grad group-hover:text-black group-hover:border-transparent transition-all duration-300"
-                      >
-                        <MessageCircle className="h-4 w-4" />
-                        S'inscrire
-                      </button>
+                      <div className="mt-6 flex gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            whatsappActivity(a.name);
+                          }}
+                          className="btn-ghost flex-1 flex items-center justify-center gap-2 group-hover:bg-accent-grad group-hover:text-black group-hover:border-transparent transition-all duration-300"
+                        >
+                          <MessageCircle className="h-4 w-4" />
+                          S'inscrire
+                        </button>
+                        <button
+                          onClick={() => setSelectedActivity(a)}
+                          className="btn-ghost !px-3.5 hover:text-accent hover:border-accent/40"
+                          aria-label="Voir les détails"
+                          title="Voir les détails"
+                        >
+                          <Info className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   </TiltCard>
                 ))}
@@ -387,29 +409,35 @@ export default function PublicWebsite() {
               </p>
               
               <div className="mt-8 space-y-4">
-                <a href={`tel:${c.phone}`} className="flex items-center gap-4 p-3 rounded-xl bg-surface-2/30 hover:bg-surface-2/60 border border-line/5 hover:border-accent/30 text-fg hover:text-accent transition-all duration-300 group">
-                  <span className="grid h-12 w-12 place-items-center rounded-xl bg-accent/10 text-accent group-hover:scale-105 transition-transform"><Phone className="h-5 w-5" /></span>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] uppercase font-extrabold text-muted tracking-wider">Téléphone</span>
-                    <span className="text-sm sm:text-base font-semibold">{c.phone}</span>
-                  </div>
-                </a>
-                
-                <a href={`mailto:${c.email}`} className="flex items-center gap-4 p-3 rounded-xl bg-surface-2/30 hover:bg-surface-2/60 border border-line/5 hover:border-accent/30 text-fg hover:text-accent transition-all duration-300 group">
-                  <span className="grid h-12 w-12 place-items-center rounded-xl bg-accent-soft/10 text-accent-soft group-hover:scale-105 transition-transform"><Mail className="h-5 w-5" /></span>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] uppercase font-extrabold text-muted tracking-wider">Email</span>
-                    <span className="text-sm sm:text-base font-semibold">{c.email}</span>
-                  </div>
-                </a>
-                
-                <a href={c.map} target="_blank" rel="noreferrer" className="flex items-center gap-4 p-3 rounded-xl bg-surface-2/30 hover:bg-surface-2/60 border border-line/5 hover:border-accent/30 text-fg hover:text-accent transition-all duration-300 group">
-                  <span className="grid h-12 w-12 place-items-center rounded-xl bg-accent-strong/10 text-accent-strong group-hover:scale-105 transition-transform"><MapPin className="h-5 w-5" /></span>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] uppercase font-extrabold text-muted tracking-wider">Adresse</span>
-                    <span className="text-sm sm:text-base font-semibold text-left">{data.club.address}</span>
-                  </div>
-                </a>
+                {c.phone && (
+                  <a href={`tel:${c.phone}`} className="flex items-center gap-4 p-3 rounded-xl bg-surface-2/30 hover:bg-surface-2/60 border border-line/5 hover:border-accent/30 text-fg hover:text-accent transition-all duration-300 group">
+                    <span className="grid h-12 w-12 place-items-center rounded-xl bg-accent/10 text-accent group-hover:scale-105 transition-transform"><Phone className="h-5 w-5" /></span>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase font-extrabold text-muted tracking-wider">Téléphone</span>
+                      <span className="text-sm sm:text-base font-semibold" dir="ltr">{c.phone}</span>
+                    </div>
+                  </a>
+                )}
+
+                {c.email && (
+                  <a href={`mailto:${c.email}`} className="flex items-center gap-4 p-3 rounded-xl bg-surface-2/30 hover:bg-surface-2/60 border border-line/5 hover:border-accent/30 text-fg hover:text-accent transition-all duration-300 group">
+                    <span className="grid h-12 w-12 place-items-center rounded-xl bg-accent-soft/10 text-accent-soft group-hover:scale-105 transition-transform"><Mail className="h-5 w-5" /></span>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase font-extrabold text-muted tracking-wider">Email</span>
+                      <span className="text-sm sm:text-base font-semibold break-all">{c.email}</span>
+                    </div>
+                  </a>
+                )}
+
+                {(data.club.address || c.map) && (
+                  <a href={c.map || undefined} target="_blank" rel="noreferrer" className="flex items-center gap-4 p-3 rounded-xl bg-surface-2/30 hover:bg-surface-2/60 border border-line/5 hover:border-accent/30 text-fg hover:text-accent transition-all duration-300 group">
+                    <span className="grid h-12 w-12 place-items-center rounded-xl bg-accent-strong/10 text-accent-strong group-hover:scale-105 transition-transform"><MapPin className="h-5 w-5" /></span>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase font-extrabold text-muted tracking-wider">Adresse</span>
+                      <span className="text-sm sm:text-base font-semibold text-left">{data.club.address || 'Voir sur la carte'}</span>
+                    </div>
+                  </a>
+                )}
               </div>
               
               <div className="flex flex-wrap gap-2.5 mt-8">
@@ -425,6 +453,7 @@ export default function PublicWebsite() {
             
             {/* Quick Action Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {c.phone && (
               <TiltButton onClick={call} className="group p-8 flex flex-col items-center gap-4 text-center rounded-2xl bg-surface-2/40 border border-line/5 hover:border-accent/40 transition-all duration-500 hover:shadow-glow relative overflow-hidden">
                 <div className="absolute inset-0 bg-accent/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <span className="grid h-16 w-16 place-items-center rounded-2xl bg-accent-grad text-black shadow-glow group-hover:scale-110 transition-transform"><Phone className="h-7 w-7" /></span>
@@ -433,7 +462,9 @@ export default function PublicWebsite() {
                   <span className="block text-xs text-muted font-semibold mt-1">Ligne directe</span>
                 </div>
               </TiltButton>
+              )}
 
+              {(c.whatsapp || c.phone) && (
               <TiltButton onClick={whatsappContact} className="group p-8 flex flex-col items-center gap-4 text-center rounded-2xl bg-surface-2/40 border border-line/5 hover:border-accent-strong/40 transition-all duration-500 hover:shadow-glow relative overflow-hidden">
                 <div className="absolute inset-0 bg-accent-strong/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <span className="grid h-16 w-16 place-items-center rounded-2xl bg-success/20 text-success border border-success/30 group-hover:scale-110 transition-transform"><MessageCircle className="h-7 w-7" /></span>
@@ -442,6 +473,7 @@ export default function PublicWebsite() {
                   <span className="block text-xs text-muted font-semibold mt-1">Chat instantané</span>
                 </div>
               </TiltButton>
+              )}
             </div>
           </div>
         </SpotlightCard>
@@ -459,6 +491,36 @@ export default function PublicWebsite() {
           </div>
           <span className="font-display font-black text-fg uppercase tracking-tight">{data.club.name}</span>
         </div>
+
+        {/* Contact recap so the essentials are one tap away at the bottom of the page too */}
+        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 px-5 mb-4 text-xs font-semibold">
+          {c.phone && (
+            <a href={`tel:${c.phone}`} className="inline-flex items-center gap-1.5 hover:text-accent transition-colors">
+              <Phone className="h-3.5 w-3.5 text-accent" /><span dir="ltr">{c.phone}</span>
+            </a>
+          )}
+          {c.email && (
+            <a href={`mailto:${c.email}`} className="inline-flex items-center gap-1.5 hover:text-accent transition-colors break-all">
+              <Mail className="h-3.5 w-3.5 text-accent" />{c.email}
+            </a>
+          )}
+          {data.club.address && (
+            <span className="inline-flex items-center gap-1.5">
+              <MapPin className="h-3.5 w-3.5 text-accent" />{data.club.address}
+            </span>
+          )}
+        </div>
+        {(c.facebook || c.instagram || c.tiktok) && (
+          <div className="flex flex-wrap justify-center gap-2.5 px-5 mb-5">
+            {[['Facebook', c.facebook], ['Instagram', c.instagram], ['TikTok', c.tiktok]].map(([n, url]) =>
+              url ? (
+                <a key={n} href={url} target="_blank" rel="noreferrer" className="btn-ghost !px-3.5 !py-2 text-xs font-bold hover:border-accent/40 flex items-center gap-1.5">
+                  <Share2 className="h-3.5 w-3.5" />{n}
+                </a>
+              ) : null
+            )}
+          </div>
+        )}
         <p className="text-xs font-semibold">© {new Date().getFullYear()} {data.club.name}. Tous droits réservés.</p>
       </footer>
 
@@ -529,6 +591,12 @@ export default function PublicWebsite() {
                     <MessageCircle className="h-5 w-5" />
                     S'inscrire via WhatsApp
                   </button>
+                  {c.phone && (
+                    <a href={`tel:${c.phone}`} className="btn-ghost !px-6 !py-4 flex items-center justify-center gap-2">
+                      <Phone className="h-4 w-4" />
+                      Appeler
+                    </a>
+                  )}
                   <button
                     onClick={() => setSelectedActivity(null)}
                     className="btn-ghost !px-6 !py-4"
