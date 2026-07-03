@@ -47,7 +47,8 @@ create table if not exists public.club_info (
   nif         text not null default '',
   nis         text not null default '',
   article     text not null default '',
-  rc          text not null default ''
+  rc          text not null default '',
+  reg_fee_amount numeric not null default 0
 );
 
 create table if not exists public.club_contact (

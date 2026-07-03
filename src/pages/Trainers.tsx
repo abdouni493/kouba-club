@@ -15,6 +15,7 @@ import { usePermissions } from '../lib/permissions';
 import { money, uid, today, fmtDate, daysUntil } from '../lib/utils';
 import { computeUnpaid, monthLabel } from '../lib/staff';
 import { sendClubEmail } from '../lib/email';
+import { buildPlayerSubscriptionPdf } from '../lib/pdf';
 import type { Trainer, MoneyEntry } from '../lib/types';
 
 const empty = { fullName: '', phone: '', email: '', address: '', paymentType: 'month' as 'month' | 'percentage', monthlyAmount: 40000, percentage: 20 };
@@ -332,8 +333,12 @@ export default function Trainers() {
         if (recipients.length === 0) continue;
         const d = daysUntil(p.assignedSubscription.expiryDate);
         const status = d < 0 ? `expiré depuis ${-d}j` : `expire dans ${d}j`;
-        const html = `<p>Bonjour,</p><p>L'abonnement de ${L.playerName(p)} (${status}, échéance ${fmtDate(p.assignedSubscription.expiryDate)}) nécessite votre attention.</p>`;
-        try { await sendClubEmail(data.club, recipients, t('trainers.notifyExpiry'), html); ok++; } catch { fail++; }
+        const html = `<p>Bonjour,</p><p>L'abonnement de ${L.playerName(p)} (${status}, échéance ${fmtDate(p.assignedSubscription.expiryDate)}) nécessite votre attention.</p><p>Vous trouverez la fiche complète en pièce jointe.</p>`;
+        try {
+          const pdf = await buildPlayerSubscriptionPdf(data.club, p, parent, L);
+          await sendClubEmail(data.club, recipients, t('trainers.notifyExpiry'), html, [{ name: pdf.filename, content: pdf.base64 }]);
+          ok++;
+        } catch { fail++; }
       }
       setSending(false);
       toast(fail === 0 ? `${ok} e-mail(s) envoyé(s)` : `${ok} envoyé(s), ${fail} échoué(s)`, fail === 0 ? 'success' : 'error');

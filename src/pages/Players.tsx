@@ -5,7 +5,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import Barcode from 'react-barcode';
 import {
   Users, Plus, Eye, Pencil, Trash2, Ticket, CreditCard, CircleDollarSign, Calendar,
-  Phone, Mail, MapPin, User, Bell, Check, Upload, Printer, Trophy, X, ScanLine,
+  Phone, Mail, MapPin, User, Bell, Check, Upload, Printer, Trophy, X, ScanLine, AlertTriangle,
 } from 'lucide-react';
 import { PageHeader, Badge, EmptyState, useConfirm, SearchInput, Avatar, Tabs } from '../components/ui/Display';
 import Modal from '../components/ui/Modal';
@@ -17,9 +17,23 @@ import { useLookups } from '../lib/selectors';
 import { usePermissions } from '../lib/permissions';
 import { money, uid, today, fmtDate, addDays, daysUntil } from '../lib/utils';
 import { sendClubEmail } from '../lib/email';
-import type { Player, AssignedSubscription } from '../lib/types';
+import { buildPlayerSubscriptionPdf } from '../lib/pdf';
+import type { Player, AssignedSubscription, Payment } from '../lib/types';
 
 const emptyPlayer = { firstName: '', lastName: '', birthDate: '', birthPlace: '', phone: '', email: '', parentId: '' };
+
+// Card/print/PDF brand hexes — hardcoded (not the CSS var) so printed/emailed output never shifts with the viewer's theme.
+const CARD_ACCENT = '#EA580C';
+const CARD_ACCENT_STRONG = '#C2410C';
+const CARD_ACCENT_SOFT = '#F97316';
+const BALL_PATTERN_BG = `url("data:image/svg+xml,${encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'>" +
+  "<g fill='none' stroke='#EA580C' stroke-width='1.2' opacity='0.07'>" +
+  "<circle cx='32' cy='32' r='11'/>" +
+  "<path d='M32 21l7 5-2.5 8h-9L25 26z'/>" +
+  "<path d='M32 21V13M39 26l7-3M36.5 34l5 6M27.5 34l-5 6M25 26l-7-3'/>" +
+  "</g></svg>",
+)}")`;
 
 export default function Players() {
   const { t } = useTranslation();
@@ -163,7 +177,11 @@ export default function Players() {
             <h3 className="font-display font-bold text-fg truncate">{L.playerName(p)}</h3>
             <p className="text-xs text-muted flex items-center gap-1"><Phone className="h-3 w-3" />{p.phone || '—'}</p>
           </div>
-          <Badge tone={p.subscriptionCostPaid ? 'success' : 'muted'}>{p.subscriptionCostPaid ? t('players.regPaid') : t('players.regUnpaid')}</Badge>
+          {p.subscriptionCostPaid ? (
+            <Badge tone="success">{t('players.regPaid')}</Badge>
+          ) : (
+            <Badge tone="danger" className="flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{t('players.regUnpaid')}</Badge>
+          )}
         </div>
 
         {a && tm ? (
@@ -243,7 +261,11 @@ export default function Players() {
                   <Info label={t('common.rest')} value={money(a.rest)} accent={a.rest > 0} />
                 </div>
                 <div className="flex items-center gap-2"><Badge tone={a.status === 'payed' ? 'success' : 'warning'}>{a.status === 'payed' ? t('common.paid') : t('players.debt')}</Badge>
-                  <Badge tone={p.subscriptionCostPaid ? 'success' : 'muted'}>{p.subscriptionCostPaid ? t('players.regPaid') : t('players.regUnpaid')}</Badge></div>
+                  {p.subscriptionCostPaid ? (
+                    <Badge tone="success">{t('players.regPaid')}</Badge>
+                  ) : (
+                    <Badge tone="danger" className="flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{t('players.regUnpaid')}</Badge>
+                  )}</div>
                 <button onClick={removeSub} className="btn-danger"><Trash2 className="h-4 w-4" />{t('players.removeSub')}</button>
               </div>
             ) : <EmptyState title={t('players.noSub')} hint="Utilisez « Assigner abonnement »." icon={<Ticket className="h-7 w-7" />} />
@@ -268,20 +290,32 @@ export default function Players() {
     const [subId, setSubId] = useState(p.assignedSubscription?.subscriptionId || '');
     const [startDate, setStartDate] = useState(today());
     const sub = data.subscriptions.find((s) => s.id === subId);
-    const [amountPaid, setAmountPaid] = useState<number>(sub?.totalPrice || 0);
-    const [regPaid, setRegPaid] = useState(p.subscriptionCostPaid);
-    const price = sub?.totalPrice || 0;
+    const regFeeAmount = data.club.regFeeAmount || 0;
+    const alreadyPaidReg = p.subscriptionCostPaid;
+    const [collectFee, setCollectFee] = useState(!alreadyPaidReg && regFeeAmount > 0);
+    const feeToCollect = !alreadyPaidReg && collectFee ? regFeeAmount : 0;
+    const subPrice = sub?.totalPrice || 0;
+    const price = subPrice + feeToCollect;
+    const [amountPaid, setAmountPaid] = useState<number>(price);
     const expiry = sub ? addDays(startDate, sub.periodDays) : '';
-    const rest = Math.max(0, price - amountPaid);
+    const amountPaidClamped = Math.min(amountPaid, price);
+    const rest = Math.max(0, price - amountPaidClamped);
 
-    const onPick = (v: string) => { setSubId(v); const s = data.subscriptions.find((x) => x.id === v); setAmountPaid(s?.totalPrice || 0); };
+    const onPick = (v: string) => { setSubId(v); const s = data.subscriptions.find((x) => x.id === v); setAmountPaid((s?.totalPrice || 0) + feeToCollect); };
 
     const save = () => {
       if (!sub) { toast('Sélectionnez un abonnement', 'error'); return; }
-      const a: AssignedSubscription = { subscriptionId: sub.id, timingId: sub.timingId, startDate, expiryDate: expiry, price, amountPaid, rest, status: rest > 0 ? 'debt' : 'payed' };
-      const payment = { id: uid('pay'), date: today(), amount: amountPaid, note: `Abonnement ${sub.name}${rest > 0 ? ' (acompte)' : ''}`, kind: 'subscription' as const };
-      updateItem('players', p.id, { assignedSubscription: a, subscriptionCostPaid: regPaid, payments: [payment, ...p.payments] });
-      toast(rest > 0 ? 'Abonnement assigné (créance)' : 'Abonnement assigné (payé)', 'success');
+      const feeSettledNow = !alreadyPaidReg && collectFee && (feeToCollect === 0 || amountPaidClamped >= feeToCollect);
+      const feeAmountPaid = feeSettledNow ? feeToCollect : 0;
+      const subAmountPaid = amountPaidClamped - feeAmountPaid;
+      const subRest = Math.max(0, subPrice - subAmountPaid);
+      const a: AssignedSubscription = { subscriptionId: sub.id, timingId: sub.timingId, startDate, expiryDate: expiry, price: subPrice, amountPaid: subAmountPaid, rest: subRest, status: subRest > 0 ? 'debt' : 'payed' };
+      const payments: Payment[] = [
+        { id: uid('pay'), date: today(), amount: subAmountPaid, note: `Abonnement ${sub.name}${subRest > 0 ? ' (acompte)' : ''}`, kind: 'subscription' },
+        ...(feeSettledNow ? [{ id: uid('pay'), date: today(), amount: feeToCollect, note: 'Frais d\'inscription', kind: 'fee' as const }] : []),
+      ];
+      updateItem('players', p.id, { assignedSubscription: a, subscriptionCostPaid: alreadyPaidReg || feeSettledNow, payments: [...payments, ...p.payments] });
+      toast(subRest > 0 ? 'Abonnement assigné (créance)' : 'Abonnement assigné (payé)', 'success');
       onClose();
       setEmailAsk(p);
     };
@@ -303,10 +337,22 @@ export default function Players() {
                 <Input label={t('players.howMuchPaid')} type="number" value={amountPaid} onChange={(e) => setAmountPaid(Math.min(price, Math.max(0, +e.target.value)))} />
                 <div><label className="label">{t('common.rest')}</label><div className={`input bg-surface-3 font-bold ${rest > 0 ? 'text-danger' : 'text-success'}`}>{money(rest)}</div></div>
               </div>
-              <label className="flex items-center gap-3 rounded-xl bg-surface-2 p-3.5 cursor-pointer">
-                <input type="checkbox" checked={regPaid} onChange={(e) => setRegPaid(e.target.checked)} className="h-5 w-5 accent-[rgb(var(--accent))]" />
-                <div><p className="text-sm font-semibold text-fg">{t('players.regFee')}</p><p className="text-xs text-muted">Cocher si le joueur a payé les frais d'inscription</p></div>
-              </label>
+
+              {alreadyPaidReg ? (
+                <div className="rounded-xl bg-success/10 border border-success/30 px-4 py-3 flex items-center gap-2">
+                  <Check className="h-4 w-4 text-success" />
+                  <span className="text-sm font-semibold text-fg">{t('players.regPaid')}</span>
+                </div>
+              ) : (
+                <div className="rounded-xl bg-danger/10 border border-danger/30 p-3.5">
+                  <div className="flex items-center gap-2 text-danger font-semibold text-sm"><AlertTriangle className="h-4 w-4" />{t('players.regUnpaid')}</div>
+                  <label className="flex items-center gap-3 mt-2.5 cursor-pointer">
+                    <input type="checkbox" checked={collectFee} onChange={(e) => setCollectFee(e.target.checked)} className="h-5 w-5 accent-[rgb(var(--accent))]" />
+                    <span className="text-xs text-fg">{t('players.collectFeeNow')}{regFeeAmount > 0 ? ` (${money(regFeeAmount)})` : ''}</span>
+                  </label>
+                </div>
+              )}
+
               <div className={`rounded-xl border px-4 py-3 ${rest > 0 ? 'bg-warning/10 border-warning/30' : 'bg-success/10 border-success/30'}`}>
                 <p className="text-sm font-semibold">{rest > 0 ? `⚠ Enregistré comme créance — reste ${money(rest)}` : '✓ Enregistré comme payé'}</p>
               </div>
@@ -376,28 +422,34 @@ export default function Players() {
         </div>
 
         <div className="flex justify-center">
-          <div className="print-card w-[340px] rounded-2xl overflow-hidden bg-white text-black shadow-2xl" style={{ border: '1px solid #eee' }}>
-            <div className="px-5 py-4 flex items-center gap-3" style={{ backgroundImage: 'linear-gradient(135deg, #ea580c, #ff7a00)' }}>
-              <div className="grid h-10 w-10 place-items-center rounded-xl bg-white/20"><Trophy className="h-5 w-5 text-white" /></div>
-              <div><p className="font-extrabold text-white leading-none">{data.club.name}</p><p className="text-[10px] text-white/80 mt-1">{data.club.address}</p></div>
+          <div className="print-card w-[340px] rounded-2xl overflow-hidden bg-white text-black shadow-2xl" style={{ border: '1px solid #eee', backgroundImage: BALL_PATTERN_BG }}>
+            <div className="px-5 py-4 flex items-center gap-3" style={{ backgroundImage: `linear-gradient(135deg, ${CARD_ACCENT_STRONG} 0%, ${CARD_ACCENT} 55%, ${CARD_ACCENT_SOFT} 100%)` }}>
+              <div className="grid h-11 w-11 place-items-center rounded-xl bg-white/20 overflow-hidden shrink-0">
+                {data.club.logo ? <img src={data.club.logo} alt="" className="h-full w-full object-cover" /> : <Trophy className="h-5 w-5 text-white" />}
+              </div>
+              <div className="min-w-0">
+                <p className="font-display font-extrabold text-white leading-tight truncate">{data.club.name}</p>
+                <p className="text-[10px] text-white/80 mt-0.5 truncate">{data.club.address}</p>
+              </div>
             </div>
             <div className="p-5 flex gap-4">
-              <div className="h-24 w-24 rounded-xl overflow-hidden bg-gray-100 grid place-items-center shrink-0" style={{ border: '2px solid #ff7a00' }}>
+              <div className="h-24 w-24 rounded-xl overflow-hidden bg-gray-100 grid place-items-center shrink-0" style={{ border: `2px solid ${CARD_ACCENT}` }}>
                 {photo ? <img src={photo} alt="" className="h-full w-full object-cover" /> : <User className="h-10 w-10 text-gray-300" />}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-lg font-extrabold leading-tight">{L.playerName(p)}</p>
-                <p className="text-xs text-gray-500 mt-0.5">{fmtDate(p.birthDate)} · {p.birthPlace}</p>
-                <p className="text-xs text-gray-500 mt-2">Tel: {p.phone}</p>
-                {p.assignedSubscription && <p className="text-[11px] text-gray-500 mt-1">{L.catName(L.tm[p.assignedSubscription.timingId]?.categoryId)} · {L.grpName(L.tm[p.assignedSubscription.timingId]?.groupId)}</p>}
+                <p className="font-display text-lg font-extrabold leading-tight">{L.playerName(p)}</p>
+                <p className="text-xs text-gray-500 mt-1">{fmtDate(p.birthDate)} · {p.birthPlace}</p>
+                <p className="text-xs text-gray-500 mt-1.5">Tel: {p.phone}</p>
+                {p.assignedSubscription && <p className="text-[11px] font-semibold mt-1.5" style={{ color: CARD_ACCENT_STRONG }}>{L.catName(L.tm[p.assignedSubscription.timingId]?.categoryId)} · {L.grpName(L.tm[p.assignedSubscription.timingId]?.groupId)}</p>}
               </div>
             </div>
-            <div className="px-5 pb-5 flex justify-center">
+            <div className="mx-5 h-px" style={{ backgroundImage: `linear-gradient(90deg, transparent, ${CARD_ACCENT}55, transparent)` }} />
+            <div className="px-5 py-5 flex justify-center">
               {type === 'qr'
                 ? <QRCodeSVG value={`OFC-${p.id}`} size={120} fgColor="#111111" level="M" />
                 : <Barcode value={p.id.slice(-10).toUpperCase()} height={56} width={1.6} fontSize={12} background="#ffffff" />}
             </div>
-            <div className="text-center text-[10px] text-gray-400 pb-3">ID: {p.id.toUpperCase()}</div>
+            <div className="text-center text-[10px] text-gray-400 pb-3 tracking-wide">ID: {p.id.toUpperCase()}</div>
           </div>
         </div>
       </Modal>
@@ -416,8 +468,9 @@ export default function Players() {
       setSending(true);
       try {
         const a = player.assignedSubscription;
-        const html = `<p>Bonjour,</p><p>Confirmation d'abonnement pour ${player.firstName} ${player.lastName}${a ? ` : ${L.timingName(a.timingId)} — ${money(a.price)} (exp. ${fmtDate(a.expiryDate)})` : ''}.</p>`;
-        await sendClubEmail(data.club, recipients, t('players.sendMail'), html);
+        const html = `<p>Bonjour,</p><p>Confirmation d'abonnement pour ${player.firstName} ${player.lastName}${a ? ` : ${L.timingName(a.timingId)} — ${money(a.price)} (exp. ${fmtDate(a.expiryDate)})` : ''}.</p><p>Vous trouverez la fiche complète en pièce jointe.</p>`;
+        const pdf = await buildPlayerSubscriptionPdf(data.club, player, parent, L);
+        await sendClubEmail(data.club, recipients, t('players.sendMail'), html, [{ name: pdf.filename, content: pdf.base64 }]);
         toast('E-mail envoyé', 'success');
         onClose();
       } catch (err) {

@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
-import { Ticket, Plus, Eye, Pencil, Trash2, Clock, CalendarDays, Hash, Users } from 'lucide-react';
+import { Ticket, Plus, Eye, Pencil, Trash2, Clock, CalendarDays, Hash, Users, Save, CircleDollarSign } from 'lucide-react';
 import { PageHeader, Badge, EmptyState, useConfirm, SearchInput } from '../components/ui/Display';
 import Modal from '../components/ui/Modal';
-import { SearchSelect, Input } from '../components/ui/Fields';
+import { SearchSelect, Input, Select } from '../components/ui/Fields';
 import { useData } from '../context/DataContext';
 import { useToast } from '../context/ToastContext';
 import { useLookups } from '../lib/selectors';
@@ -13,10 +13,11 @@ import { money, uid } from '../lib/utils';
 import type { Subscription } from '../lib/types';
 
 const empty = { timingId: '', periodDays: 30, totalSeances: 8, pricePerSeance: 500, totalPrice: 4000 };
+const emptyFilters = { search: '', category: '', group: '', sport: '', trainer: '' };
 
 export default function Subscriptions() {
   const { t } = useTranslation();
-  const { data, add, updateItem, remove } = useData();
+  const { data, add, updateItem, remove, patch } = useData();
   const { toast } = useToast();
   const L = useLookups();
   const confirm = useConfirm();
@@ -26,7 +27,10 @@ export default function Subscriptions() {
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(empty);
   const [detail, setDetail] = useState<Subscription | null>(null);
-  const [search, setSearch] = useState('');
+  const [f, setF] = useState(emptyFilters);
+  const [regFee, setRegFee] = useState(data.club.regFeeAmount || 0);
+
+  useEffect(() => { setRegFee(data.club.regFeeAmount || 0); }, [data.club.regFeeAmount]);
 
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
 
@@ -45,14 +49,41 @@ export default function Subscriptions() {
     setOpen(false);
   };
 
-  const filtered = data.subscriptions.filter((s) => s.name.toLowerCase().includes(search.toLowerCase()));
+  const saveRegFee = () => { patch({ club: { ...data.club, regFeeAmount: regFee } }); toast('Frais d’inscription enregistrés', 'success'); };
+
+  const filtered = useMemo(() => data.subscriptions.filter((s) => {
+    if (f.search && !s.name.toLowerCase().includes(f.search.toLowerCase())) return false;
+    const tm = L.tm[s.timingId];
+    if (f.category && tm?.categoryId !== f.category) return false;
+    if (f.group && tm?.groupId !== f.group) return false;
+    if (f.sport && tm?.sportId !== f.sport) return false;
+    if (f.trainer && tm?.trainerId !== f.trainer) return false;
+    return true;
+  }), [data.subscriptions, f, L]);
 
   return (
     <div>
       <PageHeader title={t('subs.title')} subtitle={`${data.subscriptions.length} abonnements`} icon={<Ticket className="h-5 w-5" />}
         actions={<button onClick={openCreate} className="btn-primary"><Plus className="h-4 w-4" />{t('subs.newSub')}</button>} />
 
-      <div className="card p-4 mb-5"><SearchInput value={search} onChange={setSearch} placeholder={t('subs.searchTiming')} /></div>
+      <div className="card p-4 mb-5 flex flex-col sm:flex-row sm:items-end gap-3">
+        <div className="flex-1">
+          <label className="label flex items-center gap-1.5"><CircleDollarSign className="h-3.5 w-3.5" />{t('subs.regFeeAmount')}</label>
+          <Input type="number" value={regFee} onChange={(e) => setRegFee(Math.max(0, +e.target.value))} />
+          <p className="text-xs text-faint mt-1">{t('subs.regFeeHint')}</p>
+        </div>
+        <button onClick={saveRegFee} className="btn-primary"><Save className="h-4 w-4" />{t('common.save')}</button>
+      </div>
+
+      <div className="card p-4 mb-5 space-y-3">
+        <SearchInput value={f.search} onChange={(v) => setF({ ...f, search: v })} placeholder={t('subs.searchTiming')} />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+          <Select value={f.category} onChange={(v) => setF({ ...f, category: v })} placeholder={t('subs.filterCategory')} options={data.categories.map((c) => ({ value: c.id, label: c.name }))} />
+          <Select value={f.group} onChange={(v) => setF({ ...f, group: v })} placeholder={t('subs.filterGroup')} options={data.groups.map((c) => ({ value: c.id, label: c.name }))} />
+          <Select value={f.sport} onChange={(v) => setF({ ...f, sport: v })} placeholder={t('subs.filterSport')} options={data.sports.map((c) => ({ value: c.id, label: c.name }))} />
+          <Select value={f.trainer} onChange={(v) => setF({ ...f, trainer: v })} placeholder={t('subs.filterTrainer')} options={data.trainers.map((c) => ({ value: c.id, label: c.fullName }))} />
+        </div>
+      </div>
 
       {filtered.length === 0 ? (
         <EmptyState title="Aucun abonnement" icon={<Ticket className="h-7 w-7" />} />

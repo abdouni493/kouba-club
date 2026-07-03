@@ -71,7 +71,7 @@ export function emptyAppData(): AppData {
     trainers: [], timings: [], subscriptions: [], players: [], parents: [], workers: [],
     expenses: [], transactions: [], activities: [],
     contact: { facebook: '', instagram: '', tiktok: '', map: '', phone: '', whatsapp: '', email: '' },
-    club: { logo: '', name: '', description: '', email: '', phone: '', address: '', nif: '', nis: '', article: '', rc: '' },
+    club: { logo: '', name: '', description: '', email: '', phone: '', address: '', nif: '', nis: '', article: '', rc: '', regFeeAmount: 0 },
   };
 }
 
@@ -153,7 +153,7 @@ function mapWorker(r: Row, moneyRows: Row[], paymentRows: Row[]): Worker {
 const mapExpense = (r: Row): Expense => ({ id: r.id, name: r.name, categoryId: r.category_id || '', description: r.description || '', amount: r.amount, date: r.date });
 const mapTransaction = (r: Row): CaisseTransaction => ({ id: r.id, type: r.type, amount: r.amount, date: r.date, description: r.description || '' });
 const mapActivity = (r: Row): Activity => ({ id: r.id, name: r.name, description: r.description || '', image: r.image || 'grad-1' });
-const mapClub = (r: Row): ClubInfo => ({ logo: r.logo_url || '', name: r.name || '', description: r.description || '', email: r.email || '', phone: r.phone || '', address: r.address || '', nif: r.nif || '', nis: r.nis || '', article: r.article || '', rc: r.rc || '' });
+const mapClub = (r: Row): ClubInfo => ({ logo: r.logo_url || '', name: r.name || '', description: r.description || '', email: r.email || '', phone: r.phone || '', address: r.address || '', nif: r.nif || '', nis: r.nis || '', article: r.article || '', rc: r.rc || '', regFeeAmount: r.reg_fee_amount ?? 0 });
 const mapContact = (r: Row): ClubContact => ({ facebook: r.facebook || '', instagram: r.instagram || '', tiktok: r.tiktok || '', map: r.map || '', phone: r.phone || '', whatsapp: r.whatsapp || '', email: r.email || '' });
 
 // ============================== fetching ==============================
@@ -245,7 +245,7 @@ export async function fetchAllData(): Promise<AppData> {
 export async function upsertClub(c: ClubInfo): Promise<void> {
   await checkErr(supabase.from('club_info').upsert({
     id: 1, logo_url: c.logo, name: c.name, description: c.description, email: c.email, phone: c.phone,
-    address: c.address, nif: c.nif, nis: c.nis, article: c.article, rc: c.rc,
+    address: c.address, nif: c.nif, nis: c.nis, article: c.article, rc: c.rc, reg_fee_amount: c.regFeeAmount,
   }));
 }
 

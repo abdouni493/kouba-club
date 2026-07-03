@@ -46,6 +46,8 @@ const fr = {
     title: 'Abonnements', newSub: 'Nouvel abonnement', timing: 'Créneau', periodDays: 'Période (jours)',
     seances: 'Nombre de séances', pricePerSeance: 'Prix par séance', totalPrice: 'Prix total',
     searchTiming: 'Rechercher un créneau…',
+    filterCategory: 'Catégorie', filterGroup: 'Groupe', filterSport: 'Sport', filterTrainer: 'Entraîneur',
+    regFeeAmount: 'Frais d’inscription', regFeeHint: 'Montant facturé une seule fois par joueur, à l’assignation d’un abonnement',
   },
   players: {
     title: 'Joueurs', newPlayer: 'Nouveau joueur', birthPlace: 'Lieu de naissance', assign: 'Assigner abonnement',
@@ -58,7 +60,7 @@ const fr = {
     searchPh: 'Nom, téléphone, parent…', filterCategory: 'Catégorie', filterGroup: 'Groupe',
     filterSub: 'Abonnement', filterPay: 'Paiement', activeSubs: 'Actifs', expiredSubs: 'Expirés',
     soonExpiring: 'Bientôt expirés', printCard: 'Imprimer la carte', qr: 'QR Code', barcode: 'Code-barres',
-    uploadPhoto: 'Photo (impression uniquement)',
+    uploadPhoto: 'Photo (impression uniquement)', collectFeeNow: 'Encaisser les frais d’inscription maintenant',
   },
   scan: {
     title: 'Scanner une carte', subtitle: 'Scannez le QR ou le code-barres de la carte joueur',
@@ -145,6 +147,8 @@ const ar = {
   subs: {
     title: 'الاشتراكات', newSub: 'اشتراك جديد', timing: 'الحصة', periodDays: 'المدة (أيام)', seances: 'عدد الحصص',
     pricePerSeance: 'سعر الحصة', totalPrice: 'السعر الإجمالي', searchTiming: 'ابحث عن حصة…',
+    filterCategory: 'الفئة', filterGroup: 'المجموعة', filterSport: 'الرياضة', filterTrainer: 'المدرب',
+    regFeeAmount: 'رسوم التسجيل', regFeeHint: 'مبلغ يُحتسب مرة واحدة لكل لاعب عند إسناد اشتراك',
   },
   players: {
     title: 'اللاعبون', newPlayer: 'لاعب جديد', birthPlace: 'مكان الميلاد', assign: 'إسناد اشتراك', payDebt: 'دفع الدين',
@@ -155,7 +159,7 @@ const ar = {
     removeSub: 'إزالة الاشتراك', expiryAlert: 'تنبيه الانتهاء', searchPh: 'الاسم، الهاتف، الولي…',
     filterCategory: 'الفئة', filterGroup: 'المجموعة', filterSub: 'الاشتراك', filterPay: 'الدفع',
     activeSubs: 'نشطة', expiredSubs: 'منتهية', soonExpiring: 'تنتهي قريباً', printCard: 'طباعة البطاقة',
-    qr: 'رمز QR', barcode: 'الباركود', uploadPhoto: 'صورة (للطباعة فقط)',
+    qr: 'رمز QR', barcode: 'الباركود', uploadPhoto: 'صورة (للطباعة فقط)', collectFeeNow: 'تحصيل رسوم التسجيل الآن',
   },
   scan: {
     title: 'مسح البطاقة', subtitle: 'امسح رمز QR أو الباركود لبطاقة اللاعب',

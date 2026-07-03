@@ -178,5 +178,6 @@ export interface ClubInfo {
   nis: string;
   article: string;
   rc: string;
+  regFeeAmount: number;
 }
 

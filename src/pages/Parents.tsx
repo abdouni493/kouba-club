@@ -11,6 +11,7 @@ import { useLookups } from '../lib/selectors';
 import { usePermissions } from '../lib/permissions';
 import { money, uid, fmtDate } from '../lib/utils';
 import { sendClubEmail } from '../lib/email';
+import { buildPlayerSubscriptionPdf } from '../lib/pdf';
 import type { Parent } from '../lib/types';
 
 const empty = { firstName: '', lastName: '', phone: '', address: '', email: '', playerIds: [] as string[] };
@@ -170,9 +171,12 @@ export default function Parents() {
           .filter((pl): pl is NonNullable<typeof pl> => !!pl?.assignedSubscription)
           .slice(0, lastOnly ? 1 : undefined);
         const html = mode === 'report'
-          ? `<p>Bonjour ${parent.firstName},</p><p>Voici le rapport d'abonnement :</p><ul>${rows.map((pl) => `<li>${pl.firstName} — ${L.timingName(pl.assignedSubscription!.timingId)} — ${money(pl.assignedSubscription!.price)} (exp. ${fmtDate(pl.assignedSubscription!.expiryDate)})</li>`).join('')}</ul>`
+          ? `<p>Bonjour ${parent.firstName},</p><p>Voici le rapport d'abonnement :</p><ul>${rows.map((pl) => `<li>${pl.firstName} — ${L.timingName(pl.assignedSubscription!.timingId)} — ${money(pl.assignedSubscription!.price)} (exp. ${fmtDate(pl.assignedSubscription!.expiryDate)})</li>`).join('')}</ul><p>Vous trouverez la ou les fiches complètes en pièce jointe.</p>`
           : `<p>Bonjour ${parent.firstName},</p><p>${message.replace(/\n/g, '<br/>')}</p>`;
-        await sendClubEmail(data.club, [{ email: parent.email, name: `${parent.firstName} ${parent.lastName}` }], mode === 'report' ? t('parents.sendReport') : t('parents.specialMessage'), html);
+        const attachments = mode === 'report'
+          ? (await Promise.all(rows.map((pl) => buildPlayerSubscriptionPdf(data.club, pl, parent, L)))).map((pdf) => ({ name: pdf.filename, content: pdf.base64 }))
+          : undefined;
+        await sendClubEmail(data.club, [{ email: parent.email, name: `${parent.firstName} ${parent.lastName}` }], mode === 'report' ? t('parents.sendReport') : t('parents.specialMessage'), html, attachments);
         toast(`${mode === 'report' ? 'Rapport' : 'Message'} envoyé à ${parent.email}`, 'success');
         onClose();
       } catch (err) {
