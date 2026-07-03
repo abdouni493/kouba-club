@@ -1,5 +1,5 @@
 import {
-  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode,
+  createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
@@ -15,13 +15,7 @@ import { useLookups } from '../../lib/selectors';
 import { fmtDate, money } from '../../lib/utils';
 import { resolvePlayerByCode, subStatus, type SubStatus } from '../../lib/scan';
 import type { Player } from '../../lib/types';
-
-// ---- Minimal typing for the native BarcodeDetector API (Chrome / Android) ----
-interface DetectedBarcode { rawValue: string; format: string }
-interface BarcodeDetectorLike { detect(source: CanvasImageSource): Promise<DetectedBarcode[]> }
-type BarcodeDetectorCtor = new (opts?: { formats?: string[] }) => BarcodeDetectorLike;
-const getDetectorCtor = () =>
-  (window as unknown as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
+import type { IScannerControls } from '@zxing/browser';
 
 // ======================= Context / provider =======================
 
@@ -51,9 +45,7 @@ export function useScan() {
 function CameraScanner({ onDetected }: { onDetected: (code: string) => void }) {
   const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const rafRef = useRef<number>(0);
-  const stoppedRef = useRef(false);
+  const controlsRef = useRef<IScannerControls | null>(null);
   const cbRef = useRef(onDetected);
   useEffect(() => { cbRef.current = onDetected; });
 
@@ -61,58 +53,58 @@ function CameraScanner({ onDetected }: { onDetected: (code: string) => void }) {
   const [error, setError] = useState<'denied' | 'unsupported' | null>(null);
   const [ready, setReady] = useState(false);
 
-  const stop = useCallback(() => {
-    stoppedRef.current = true;
-    cancelAnimationFrame(rafRef.current);
-    streamRef.current?.getTracks().forEach((tr) => tr.stop());
-    streamRef.current = null;
-  }, []);
-
   useEffect(() => {
-    const Ctor = getDetectorCtor();
-    if (!Ctor) { setError('unsupported'); return; }
     if (!navigator.mediaDevices?.getUserMedia) { setError('unsupported'); return; }
 
-    const detector = new Ctor();
-    stoppedRef.current = false;
     setReady(false);
     setError(null);
     let cancelled = false;
 
-    const tick = async () => {
-      if (stoppedRef.current) return;
-      const v = videoRef.current;
-      if (v && v.readyState >= 2) {
-        try {
-          const codes = await detector.detect(v);
-          const hit = codes.find((c) => c.rawValue);
-          if (hit) { stop(); cbRef.current(hit.rawValue); return; }
-        } catch { /* transient decode error — keep scanning */ }
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-
     (async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: facing } },
-          audio: false,
-        });
-        if (cancelled) { stream.getTracks().forEach((tr) => tr.stop()); return; }
-        streamRef.current = stream;
-        const v = videoRef.current;
-        if (!v) return;
-        v.srcObject = stream;
-        await v.play();
+        // Loaded on demand — the ZXing decoder is only needed while the scanner is open,
+        // so it stays out of the app's main bundle.
+        const { BrowserMultiFormatReader } = await import('@zxing/browser');
+        const { DecodeHintType, BarcodeFormat } = await import('@zxing/library');
+        if (cancelled) return;
+
+        const hints = new Map();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.QR_CODE, BarcodeFormat.CODE_128, BarcodeFormat.CODE_39,
+          BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E,
+        ]);
+        hints.set(DecodeHintType.TRY_HARDER, true);
+        const reader = new BrowserMultiFormatReader(hints);
+
+        const video = videoRef.current;
+        if (!video) return;
+
+        const controls = await reader.decodeFromConstraints(
+          { video: { facingMode: { ideal: facing } }, audio: false },
+          video,
+          (result) => {
+            if (result) {
+              controlsRef.current?.stop();
+              controlsRef.current = null;
+              cbRef.current(result.getText());
+            }
+            // decode errors (no code in the current frame) are expected between hits — ignore them
+          },
+        );
+        if (cancelled) { controls.stop(); return; }
+        controlsRef.current = controls;
         setReady(true);
-        rafRef.current = requestAnimationFrame(tick);
       } catch {
         if (!cancelled) setError('denied');
       }
     })();
 
-    return () => { cancelled = true; stop(); };
-  }, [facing, stop]);
+    return () => {
+      cancelled = true;
+      controlsRef.current?.stop();
+      controlsRef.current = null;
+    };
+  }, [facing]);
 
   if (error) {
     return (
