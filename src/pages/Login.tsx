@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
-import { Trophy, Moon, Sun, Languages, ArrowRight, Globe, AtSign, Lock } from 'lucide-react';
+import { Trophy, Moon, Sun, Languages, ArrowRight, AtSign, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
@@ -115,16 +115,6 @@ export default function Login() {
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
             </button>
           </form>
-
-          <div className="my-6 flex items-center gap-3 text-xs text-faint">
-            <div className="h-px flex-1 bg-line/10" /> OU <div className="h-px flex-1 bg-line/10" />
-          </div>
-
-          <div className="space-y-3">
-            <button onClick={() => navigate('/website')} className="btn-ghost w-full !py-3">
-              <Globe className="h-4 w-4" /> {t('auth.viewWebsite')}
-            </button>
-          </div>
         </motion.div>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, CalendarRange, Ticket, Users, UserSquare2, Dumbbell, Globe,
+  LayoutDashboard, CalendarRange, Ticket, Users, UserSquare2, Dumbbell,
   HardHat, Receipt, Wallet, LineChart, FileBarChart, Settings,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
@@ -32,10 +32,6 @@ export const NAV: NavItem[] = [
   {
     key: 'trainers', path: '/app/trainers', icon: Dumbbell, group: 'management',
     actions: [{ key: 'assign', label: 'Assigner créneaux' }, { key: 'view', label: 'Voir détails' }, { key: 'acompte', label: 'Acomptes' }, { key: 'absence', label: 'Absences' }, { key: 'payment', label: 'Paiement' }, { key: 'edit', label: 'Modifier' }, { key: 'delete', label: 'Supprimer' }],
-  },
-  {
-    key: 'website', path: '/app/website', icon: Globe, group: 'management',
-    actions: [{ key: 'activities', label: 'Activités' }, { key: 'contact', label: 'Contact' }],
   },
   {
     key: 'workers', path: '/app/workers', icon: HardHat, group: 'management',
