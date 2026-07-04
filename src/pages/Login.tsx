@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Moon, Sun, Languages, ArrowRight, AtSign, Lock, User, UserPlus } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Trophy, Moon, Sun, Languages, ArrowRight, AtSign, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
@@ -11,17 +11,14 @@ import { useData } from '../context/DataContext';
 export default function Login() {
   const { t, i18n } = useTranslation();
   const { theme, toggle } = useTheme();
-  const { login, register } = useAuth();
+  const { login } = useAuth();
   const { toast } = useToast();
   const { data } = useData();
   const navigate = useNavigate();
 
-  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [form, setForm] = useState({ identifier: '', password: '' });
-  const [regForm, setRegForm] = useState({ name: '', username: '', email: '', password: '' });
   const [submitting, setSubmitting] = useState(false);
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const setReg = (k: string, v: string) => setRegForm((f) => ({ ...f, [k]: v }));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,27 +29,6 @@ export default function Login() {
       else if (r.error === 'invalid') toast(t('auth.loginError'), 'error');
       else if (r.error === 'inactive') toast('Ce compte employé est désactivé', 'error');
       else toast(r.error || t('auth.loginError'), 'error');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const registerSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    try {
-      const r = await register(regForm);
-      if (r.ok) {
-        toast('Compte admin créé avec succès !', 'success');
-        navigate('/app');
-      } else if (r.error === 'exists') {
-        toast('Ce nom d\'utilisateur ou e-mail est déjà utilisé', 'error');
-      } else if (r.error === 'confirm_email') {
-        toast('Vérifiez votre e-mail pour confirmer le compte', 'info');
-        setMode('login');
-      } else {
-        toast(r.error || 'Erreur lors de la création du compte', 'error');
-      }
     } finally {
       setSubmitting(false);
     }
@@ -119,83 +95,26 @@ export default function Login() {
             <span className="font-display text-xl font-extrabold">{data.club.name || 'Orange FC'}</span>
           </div>
 
-          <AnimatePresence mode="wait">
-            {mode === 'login' ? (
-              <motion.div key="login" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.25 }}>
-                <h2 className="font-display text-3xl font-extrabold text-fg">
-                  {t('auth.signIn')}
-                </h2>
-                <p className="text-muted mt-1.5">{t('auth.welcome')} 👋</p>
+          <h2 className="font-display text-3xl font-extrabold text-fg">
+            {t('auth.signIn')}
+          </h2>
+          <p className="text-muted mt-1.5">{t('auth.welcome')} 👋</p>
 
-                <form onSubmit={submit} className="mt-8 space-y-4">
-                  <div className="space-y-4">
-                    <Labeled icon={<AtSign className="h-4 w-4" />} label={t('auth.identifier')}>
-                      <input className="input !pl-10" required value={form.identifier} onChange={(e) => set('identifier', e.target.value)} placeholder="nom d'utilisateur ou e-mail" />
-                    </Labeled>
-                    <Labeled icon={<Lock className="h-4 w-4" />} label={t('auth.password')}>
-                      <input type="password" className="input !pl-10" required value={form.password} onChange={(e) => set('password', e.target.value)} placeholder="••••••••" />
-                    </Labeled>
-                  </div>
+          <form onSubmit={submit} className="mt-8 space-y-4">
+            <div className="space-y-4">
+              <Labeled icon={<AtSign className="h-4 w-4" />} label={t('auth.identifier')}>
+                <input className="input !pl-10" required value={form.identifier} onChange={(e) => set('identifier', e.target.value)} placeholder="nom d'utilisateur ou e-mail" />
+              </Labeled>
+              <Labeled icon={<Lock className="h-4 w-4" />} label={t('auth.password')}>
+                <input type="password" className="input !pl-10" required value={form.password} onChange={(e) => set('password', e.target.value)} placeholder="••••••••" />
+              </Labeled>
+            </div>
 
-                  <button type="submit" className="btn-primary w-full !py-3 group" disabled={submitting}>
-                    {submitting ? '…' : t('auth.signIn')}
-                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                  </button>
-                </form>
-
-                <div className="mt-6 text-center">
-                  <button
-                    type="button"
-                    onClick={() => setMode('register')}
-                    className="inline-flex items-center gap-2 text-sm font-medium text-muted hover:text-fg transition-colors"
-                  >
-                    <UserPlus className="h-4 w-4" />
-                    Créer un compte administrateur
-                  </button>
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div key="register" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25 }}>
-                <h2 className="font-display text-3xl font-extrabold text-fg">
-                  Créer un compte admin
-                </h2>
-                <p className="text-muted mt-1.5">Remplissez les informations ci-dessous 🔐</p>
-
-                <form onSubmit={registerSubmit} className="mt-8 space-y-4">
-                  <div className="space-y-4">
-                    <Labeled icon={<User className="h-4 w-4" />} label="Nom complet">
-                      <input className="input !pl-10" required value={regForm.name} onChange={(e) => setReg('name', e.target.value)} placeholder="Nom complet" />
-                    </Labeled>
-                    <Labeled icon={<AtSign className="h-4 w-4" />} label="Nom d'utilisateur">
-                      <input className="input !pl-10" required value={regForm.username} onChange={(e) => setReg('username', e.target.value)} placeholder="nom_utilisateur" />
-                    </Labeled>
-                    <Labeled icon={<AtSign className="h-4 w-4" />} label="E-mail">
-                      <input type="email" className="input !pl-10" required value={regForm.email} onChange={(e) => setReg('email', e.target.value)} placeholder="email@example.com" />
-                    </Labeled>
-                    <Labeled icon={<Lock className="h-4 w-4" />} label="Mot de passe">
-                      <input type="password" className="input !pl-10" required minLength={6} value={regForm.password} onChange={(e) => setReg('password', e.target.value)} placeholder="••••••••" />
-                    </Labeled>
-                  </div>
-
-                  <button type="submit" className="btn-primary w-full !py-3 group" disabled={submitting}>
-                    {submitting ? '…' : 'Créer le compte'}
-                    <UserPlus className="h-4 w-4 transition-transform group-hover:scale-110" />
-                  </button>
-                </form>
-
-                <div className="mt-6 text-center">
-                  <button
-                    type="button"
-                    onClick={() => setMode('login')}
-                    className="inline-flex items-center gap-2 text-sm font-medium text-muted hover:text-fg transition-colors"
-                  >
-                    <ArrowRight className="h-4 w-4 rotate-180" />
-                    Retour à la connexion
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+            <button type="submit" className="btn-primary w-full !py-3 group" disabled={submitting}>
+              {submitting ? '…' : t('auth.signIn')}
+              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+            </button>
+          </form>
         </motion.div>
       </div>
     </div>
