@@ -6,21 +6,33 @@ import Barcode from 'react-barcode';
 import {
   Users, Plus, Eye, Pencil, Trash2, Ticket, CreditCard, CircleDollarSign, Calendar,
   Phone, Mail, MapPin, User, Bell, Check, Upload, Printer, Trophy, X, ScanLine, AlertTriangle,
+  HeartPulse, FileText, UserPlus, ImagePlus, Camera, Loader2,
 } from 'lucide-react';
 import { PageHeader, Badge, EmptyState, useConfirm, SearchInput, Avatar, Tabs } from '../components/ui/Display';
 import Modal from '../components/ui/Modal';
-import { Input, Select } from '../components/ui/Fields';
+import { Input, Select, Textarea, Segmented } from '../components/ui/Fields';
 import { useData } from '../context/DataContext';
 import { useToast } from '../context/ToastContext';
 import { useScan } from '../components/scan/ScanCenter';
 import { useLookups } from '../lib/selectors';
 import { usePermissions } from '../lib/permissions';
+import { uploadImage } from '../lib/storage';
 import { money, uid, today, fmtDate, addDays, daysUntil, cx } from '../lib/utils';
 import { sendClubEmail } from '../lib/email';
 import { buildPlayerSubscriptionPdf } from '../lib/pdf';
-import type { Player, AssignedSubscription, Payment } from '../lib/types';
+import type { Player, AssignedSubscription, Payment, MedicalRecord } from '../lib/types';
 
-const emptyPlayer = { firstName: '', lastName: '', birthDate: '', birthPlace: '', phone: '', email: '', parentId: '' };
+const emptyPlayer = {
+  firstName: '', lastName: '', birthDate: '', birthPlace: '', address: '', phone: '', email: '', parentId: '',
+  photoUrl: '', documentUrls: [] as string[],
+  medStatus: true, medDescription: '', medDate: today(),
+};
+
+/** Latest medical record for a player (its "current" status), or undefined. */
+export function latestMedical(p: Player): MedicalRecord | undefined {
+  if (!p.medicalRecords || p.medicalRecords.length === 0) return undefined;
+  return [...p.medicalRecords].sort((a, b) => b.date.localeCompare(a.date))[0];
+}
 
 // Card/print/PDF brand hexes — hardcoded (not the CSS var) so printed/emailed output never shifts with the viewer's theme.
 const CARD_ACCENT = '#EA580C';
@@ -54,7 +66,38 @@ export default function Players() {
   const [alertOpen, setAlertOpen] = useState(false);
   const [emailAsk, setEmailAsk] = useState<Player | null>(null);
 
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [pquick, setPquick] = useState({ open: false, firstName: '', lastName: '', phone: '', email: '', address: '' });
+
   const [f, setF] = useState({ search: '', category: '', group: '', sub: '', pay: '', state: '' });
+
+  const onPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setUploadingPhoto(true);
+    try { const url = await uploadImage('player-photos', file); setForm((fm) => ({ ...fm, photoUrl: url })); }
+    catch (err) { toast(err instanceof Error ? err.message : 'Erreur de téléversement', 'error'); }
+    finally { setUploadingPhoto(false); }
+  };
+
+  const onDocsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []); if (!files.length) return;
+    setUploadingDoc(true);
+    try {
+      const urls = await Promise.all(files.map((file) => uploadImage('player-documents', file)));
+      setForm((fm) => ({ ...fm, documentUrls: [...fm.documentUrls, ...urls] }));
+    } catch (err) { toast(err instanceof Error ? err.message : 'Erreur de téléversement', 'error'); }
+    finally { setUploadingDoc(false); }
+  };
+
+  const createParentInline = async () => {
+    if (!pquick.firstName || !pquick.lastName) { toast('Prénom et nom du parent requis', 'error'); return; }
+    const id = uid('par');
+    await add('parents', { id, firstName: pquick.firstName, lastName: pquick.lastName, phone: pquick.phone, address: pquick.address, email: pquick.email, playerIds: [] });
+    setForm((fm) => ({ ...fm, parentId: id }));
+    setPquick({ open: false, firstName: '', lastName: '', phone: '', email: '', address: '' });
+    toast('Parent créé et sélectionné', 'success');
+  };
 
   const current = (p: Player) => data.players.find((x) => x.id === p.id) || p;
 
@@ -78,15 +121,46 @@ export default function Players() {
 
   const expiredList = data.players.filter((p) => p.assignedSubscription && daysUntil(p.assignedSubscription.expiryDate) < 0);
 
-  const openCreate = () => { setEditId(null); setForm(emptyPlayer); setFormOpen(true); };
-  const openEdit = (p: Player) => { setEditId(p.id); setForm({ firstName: p.firstName, lastName: p.lastName, birthDate: p.birthDate, birthPlace: p.birthPlace, phone: p.phone, email: p.email, parentId: p.parentId || '' }); setFormOpen(true); };
+  const resetPquick = () => setPquick({ open: false, firstName: '', lastName: '', phone: '', email: '', address: '' });
+  const openCreate = () => { setEditId(null); setForm({ ...emptyPlayer, documentUrls: [], medDate: today() }); resetPquick(); setFormOpen(true); };
+  const openEdit = (p: Player) => {
+    setEditId(p.id); resetPquick();
+    setForm({
+      ...emptyPlayer,
+      firstName: p.firstName, lastName: p.lastName, birthDate: p.birthDate, birthPlace: p.birthPlace,
+      address: p.address, phone: p.phone, email: p.email, parentId: p.parentId || '',
+      photoUrl: p.photoUrl, documentUrls: [...p.documentUrls],
+    });
+    setFormOpen(true);
+  };
+
+  // Keep the local parent.playerIds cache in sync when a player's parent changes
+  // (the real relation is players.parent_id; playerIds is derived on next refetch).
+  const relinkParent = (playerId: string, oldParentId: string | undefined, newParentId: string | undefined) => {
+    if (oldParentId === newParentId) return;
+    if (oldParentId) { const op = L.par[oldParentId]; if (op) updateItem('parents', oldParentId, { playerIds: op.playerIds.filter((x) => x !== playerId) }); }
+    if (newParentId) { const np = L.par[newParentId]; if (np && !np.playerIds.includes(playerId)) updateItem('parents', newParentId, { playerIds: [...np.playerIds, playerId] }); }
+  };
+
   const savePlayer = () => {
     if (!form.firstName || !form.lastName) { toast('Prénom et nom requis', 'error'); return; }
-    if (editId) { updateItem('players', editId, { ...form }); toast('Joueur mis à jour', 'success'); }
-    else {
+    const base = {
+      firstName: form.firstName, lastName: form.lastName, birthDate: form.birthDate, birthPlace: form.birthPlace,
+      address: form.address, phone: form.phone, email: form.email, parentId: form.parentId || undefined,
+      photoUrl: form.photoUrl, documentUrls: form.documentUrls,
+    };
+    if (editId) {
+      const prev = data.players.find((x) => x.id === editId);
+      updateItem('players', editId, base);
+      relinkParent(editId, prev?.parentId, form.parentId || undefined);
+      toast('Joueur mis à jour', 'success');
+    } else {
       const id = uid('pl');
-      add('players', { id, ...form, createdAt: today(), subscriptionCostPaid: false, payments: [] });
-      if (form.parentId) { const par = L.par[form.parentId]; if (par) updateItem('parents', par.id, { playerIds: [...par.playerIds, id] }); }
+      const medicalRecords: MedicalRecord[] = [
+        { id: uid('med'), status: form.medStatus, description: form.medDescription, date: form.medDate || today() },
+      ];
+      add('players', { id, ...base, createdAt: today(), subscriptionCostPaid: false, payments: [], medicalRecords });
+      relinkParent(id, undefined, form.parentId || undefined);
       toast('Joueur créé — inscription non payée', 'success');
     }
     setFormOpen(false);
@@ -125,13 +199,108 @@ export default function Players() {
 
       <Modal open={formOpen} onClose={() => setFormOpen(false)} size="lg" title={editId ? 'Modifier joueur' : t('players.newPlayer')}
         footer={<><button onClick={() => setFormOpen(false)} className="btn-ghost">{t('common.cancel')}</button><button onClick={savePlayer} className="btn-primary">{t('common.save')}</button></>}>
-        <div className="grid sm:grid-cols-2 gap-4">
-          <Input label={t('common.firstName')} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required />
-          <Input label={t('common.lastName')} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required />
-          <Input label={t('common.birthDate')} type="date" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} />
-          <Input label={t('players.birthPlace')} value={form.birthPlace} onChange={(e) => setForm({ ...form, birthPlace: e.target.value })} />
-          <Input label={t('common.phone')} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          <Input label={t('common.email')} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        <div className="space-y-6">
+          {/* Photo */}
+          <div className="flex items-center gap-4">
+            <div className="h-20 w-20 rounded-full overflow-hidden bg-surface-2 border border-line/10 grid place-items-center shrink-0">
+              {form.photoUrl ? <img src={form.photoUrl} alt="" className="h-full w-full object-cover" /> : <Camera className="h-7 w-7 text-faint" />}
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="btn-ghost cursor-pointer !py-2">
+                {uploadingPhoto ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+                {uploadingPhoto ? 'Envoi…' : 'Photo du joueur'}
+                <input type="file" accept="image/*" className="hidden" onChange={onPhotoUpload} disabled={uploadingPhoto} />
+              </label>
+              {form.photoUrl && <button type="button" onClick={() => setForm({ ...form, photoUrl: '' })} className="text-xs text-muted hover:text-danger text-left">Retirer la photo</button>}
+            </div>
+          </div>
+
+          {/* Identity */}
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Input label={t('common.firstName')} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required />
+            <Input label={t('common.lastName')} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required />
+            <Input label={t('common.birthDate')} type="date" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} />
+            <Input label={t('players.birthPlace')} value={form.birthPlace} onChange={(e) => setForm({ ...form, birthPlace: e.target.value })} />
+            <Input label={t('common.phone')} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            <Input label={t('common.email')} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <div className="sm:col-span-2"><Input label={t('common.address')} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
+          </div>
+
+          {/* Parent selection + inline creation */}
+          <div>
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <Select label={t('players.parentInfo')} value={form.parentId} onChange={(v) => setForm({ ...form, parentId: v })}
+                  placeholder="Aucun parent"
+                  options={data.parents.map((p) => ({ value: p.id, label: `${p.firstName} ${p.lastName}${p.phone ? ' · ' + p.phone : ''}` }))} />
+              </div>
+              <button type="button" onClick={() => setPquick((q) => ({ ...q, open: !q.open }))}
+                className={cx('btn-ghost !px-3 shrink-0', pquick.open && 'border-accent/50 text-accent')} title="Créer un parent">
+                <UserPlus className="h-4 w-4" />
+              </button>
+            </div>
+            <AnimatePresence>
+              {pquick.open && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                  <div className="mt-3 rounded-2xl bg-surface-2 border border-line/10 p-4 space-y-3">
+                    <p className="text-xs font-bold uppercase tracking-wider text-accent-soft flex items-center gap-2"><UserPlus className="h-4 w-4" />Nouveau parent</p>
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <Input label={t('common.firstName')} value={pquick.firstName} onChange={(e) => setPquick({ ...pquick, firstName: e.target.value })} required />
+                      <Input label={t('common.lastName')} value={pquick.lastName} onChange={(e) => setPquick({ ...pquick, lastName: e.target.value })} required />
+                      <Input label={t('common.phone')} value={pquick.phone} onChange={(e) => setPquick({ ...pquick, phone: e.target.value })} />
+                      <Input label={t('common.email')} type="email" value={pquick.email} onChange={(e) => setPquick({ ...pquick, email: e.target.value })} />
+                      <div className="sm:col-span-2"><Input label={t('common.address')} value={pquick.address} onChange={(e) => setPquick({ ...pquick, address: e.target.value })} /></div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={resetPquick} className="btn-ghost !py-1.5">{t('common.cancel')}</button>
+                      <button type="button" onClick={createParentInline} className="btn-primary !py-1.5"><Check className="h-4 w-4" />Créer & sélectionner</button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Medical status (only when creating — history is managed from the detail view) */}
+          {!editId && (
+            <div className="rounded-2xl bg-surface-2 border border-line/10 p-4 space-y-3">
+              <p className="text-xs font-bold uppercase tracking-wider text-muted flex items-center gap-2"><HeartPulse className="h-4 w-4 text-accent" />État médical</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <Segmented value={form.medStatus ? 'ok' : 'ko'} onChange={(v) => setForm({ ...form, medStatus: v === 'ok' })}
+                  options={[{ value: 'ok', label: '✓ Apte' }, { value: 'ko', label: '✗ Inapte' }]} />
+                <span className={cx('h-3 w-3 rounded-full', form.medStatus ? 'bg-success' : 'bg-danger')} />
+                <div className="flex-1 min-w-[140px]"><Input type="date" value={form.medDate} onChange={(e) => setForm({ ...form, medDate: e.target.value })} /></div>
+              </div>
+              <Textarea label="Description (optionnel)" value={form.medDescription} onChange={(e) => setForm({ ...form, medDescription: e.target.value })} placeholder="Antécédents, allergies, remarques…" />
+            </div>
+          )}
+
+          {/* Documents */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label !mb-0 flex items-center gap-2"><FileText className="h-4 w-4" />Documents scannés</label>
+              <label className="btn-ghost cursor-pointer !py-1.5 !px-3 text-xs">
+                {uploadingDoc ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {uploadingDoc ? 'Envoi…' : 'Ajouter'}
+                <input type="file" accept="image/*" multiple className="hidden" onChange={onDocsUpload} disabled={uploadingDoc} />
+              </label>
+            </div>
+            {form.documentUrls.length === 0 ? (
+              <p className="text-xs text-muted rounded-xl bg-surface-2 border border-line/10 px-3 py-4 text-center">Aucun document — scannez ou téléversez une image.</p>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
+                {form.documentUrls.map((url) => (
+                  <div key={url} className="relative group rounded-xl overflow-hidden border border-line/10 aspect-[3/4] bg-surface-2">
+                    <img src={url} alt="document" className="h-full w-full object-cover" />
+                    <button type="button" onClick={() => setForm({ ...form, documentUrls: form.documentUrls.filter((u) => u !== url) })}
+                      className="absolute top-1 right-1 grid h-6 w-6 place-items-center rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </Modal>
 
@@ -165,10 +334,19 @@ export default function Players() {
     const tm = a ? L.tm[a.timingId] : undefined;
     const d = a ? daysUntil(a.expiryDate) : null;
     const state = d === null ? 'none' : d < 0 ? 'expired' : d <= 7 ? 'soon' : 'active';
+    const med = latestMedical(p);
     return (
       <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }} className="card card-hover p-5 flex flex-col">
         <div className="flex items-center gap-3">
-          <Avatar name={L.playerName(p)} id={p.id} size={48} />
+          <div className="relative shrink-0">
+            <Avatar name={L.playerName(p)} id={p.id} size={48} src={p.photoUrl || undefined} />
+            {med && (
+              <span title={med.status ? 'Apte' : 'Inapte'}
+                className={cx('absolute -bottom-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full border-2 border-surface', med.status ? 'bg-success' : 'bg-danger')}>
+                <HeartPulse className="h-2.5 w-2.5 text-white" />
+              </span>
+            )}
+          </div>
           <div className="flex-1 min-w-0">
             <h3 className="font-display font-bold text-fg truncate">{L.playerName(p)}</h3>
             <p className="text-xs text-muted flex items-center gap-1"><Phone className="h-3 w-3" />{p.phone || '—'}</p>
@@ -214,22 +392,44 @@ export default function Players() {
     const [tab, setTab] = useState('info');
     const parent = p.parentId ? L.par[p.parentId] : undefined;
     const a = p.assignedSubscription;
+    const med = latestMedical(p);
+    const [medForm, setMedForm] = useState({ status: true, description: '', date: today() });
     const removeSub = () => { updateItem('players', p.id, { assignedSubscription: undefined }); toast('Abonnement retiré', 'info'); onClose(); };
+    const addMedical = () => {
+      const rec: MedicalRecord = { id: uid('med'), status: medForm.status, description: medForm.description, date: medForm.date || today() };
+      updateItem('players', p.id, { medicalRecords: [rec, ...p.medicalRecords] });
+      setMedForm({ status: true, description: '', date: today() });
+      toast('État médical enregistré', 'success');
+    };
     return (
       <Modal open onClose={onClose} size="lg" title={L.playerName(p)} subtitle={p.email}>
         <Tabs active={tab} onChange={setTab} tabs={[
           { key: 'info', label: t('players.personalInfo'), icon: <User className="h-4 w-4" /> },
+          { key: 'medical', label: 'Médical', icon: <HeartPulse className="h-4 w-4" /> },
+          { key: 'docs', label: 'Documents', icon: <FileText className="h-4 w-4" /> },
           { key: 'sub', label: t('players.subInfo'), icon: <Ticket className="h-4 w-4" /> },
           { key: 'pay', label: t('players.paymentHistory'), icon: <CircleDollarSign className="h-4 w-4" /> },
         ]} />
         <div className="mt-5">
           {tab === 'info' && (
             <div className="space-y-4">
+              <div className="flex items-center gap-4">
+                <Avatar name={L.playerName(p)} id={p.id} size={64} src={p.photoUrl || undefined} />
+                <div className="min-w-0">
+                  <p className="font-display text-lg font-bold text-fg truncate">{L.playerName(p)}</p>
+                  {med && (
+                    <Badge tone={med.status ? 'success' : 'danger'} className="mt-1 inline-flex items-center gap-1">
+                      <HeartPulse className="h-3 w-3" />{med.status ? 'Apte' : 'Inapte'}
+                    </Badge>
+                  )}
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <Info label={t('common.birthDate')} value={fmtDate(p.birthDate)} />
                 <Info label={t('players.birthPlace')} value={p.birthPlace || '—'} />
                 <Info label={t('common.phone')} value={p.phone || '—'} />
                 <Info label={t('common.email')} value={p.email || '—'} />
+                <div className="col-span-2"><Info label={t('common.address')} value={p.address || '—'} /></div>
               </div>
               <div>
                 <p className="label">{t('players.parentInfo')}</p>
@@ -243,6 +443,55 @@ export default function Players() {
                 ) : <p className="text-sm text-muted">Aucun parent lié</p>}
               </div>
             </div>
+          )}
+          {tab === 'medical' && (
+            <div className="space-y-4">
+              {canDo('players', 'edit') && (
+                <div className="rounded-2xl bg-surface-2 border border-line/10 p-4 space-y-3">
+                  <p className="text-xs font-bold uppercase tracking-wider text-muted flex items-center gap-2"><Plus className="h-4 w-4 text-accent" />Nouvel état médical</p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Segmented value={medForm.status ? 'ok' : 'ko'} onChange={(v) => setMedForm({ ...medForm, status: v === 'ok' })}
+                      options={[{ value: 'ok', label: '✓ Apte' }, { value: 'ko', label: '✗ Inapte' }]} />
+                    <div className="flex-1 min-w-[140px]"><Input type="date" value={medForm.date} onChange={(e) => setMedForm({ ...medForm, date: e.target.value })} /></div>
+                  </div>
+                  <Textarea label="Description" value={medForm.description} onChange={(e) => setMedForm({ ...medForm, description: e.target.value })} placeholder="Diagnostic, remarques…" />
+                  <div className="flex justify-end"><button onClick={addMedical} className="btn-primary !py-1.5"><Check className="h-4 w-4" />Enregistrer</button></div>
+                </div>
+              )}
+              {p.medicalRecords.length === 0 ? (
+                <EmptyState title="Aucun historique médical" icon={<HeartPulse className="h-7 w-7" />} />
+              ) : (
+                <div className="space-y-2">
+                  {[...p.medicalRecords].sort((x, y) => y.date.localeCompare(x.date)).map((m) => (
+                    <div key={m.id} className="flex items-start gap-3 rounded-xl bg-surface-2 p-3">
+                      <span className={cx('mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full', m.status ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger')}>
+                        <HeartPulse className="h-4 w-4" />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Badge tone={m.status ? 'success' : 'danger'}>{m.status ? 'Apte' : 'Inapte'}</Badge>
+                          <span className="text-xs text-muted">{fmtDate(m.date)}</span>
+                        </div>
+                        {m.description && <p className="text-sm text-fg mt-1.5">{m.description}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {tab === 'docs' && (
+            p.documentUrls.length === 0 ? (
+              <EmptyState title="Aucun document" hint="Ajoutez des documents en modifiant le joueur." icon={<FileText className="h-7 w-7" />} />
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {p.documentUrls.map((url) => (
+                  <a key={url} href={url} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border border-line/10 aspect-[3/4] bg-surface-2 card-hover">
+                    <img src={url} alt="document" className="h-full w-full object-cover" />
+                  </a>
+                ))}
+              </div>
+            )
           )}
           {tab === 'sub' && (
             a ? (
@@ -543,9 +792,10 @@ export default function Players() {
 
   function CardPrintModal({ p, onClose }: { p: Player; onClose: () => void }) {
     const [type, setType] = useState<'qr' | 'barcode'>('qr');
-    const [photo, setPhoto] = useState<string>('');
-    // Object URL is local-only (never uploaded/saved) — revoke it on unmount to avoid leaking memory.
-    useEffect(() => () => { if (photo) URL.revokeObjectURL(photo); }, [photo]);
+    const [photo, setPhoto] = useState<string>(p.photoUrl || '');
+    // A locally-picked photo is a blob: object URL — revoke it on change/unmount to
+    // avoid leaking memory. The player's saved photoUrl (http) is left untouched.
+    useEffect(() => () => { if (photo.startsWith('blob:')) URL.revokeObjectURL(photo); }, [photo]);
     const doPrint = () => {
       document.body.classList.add('printing-card');
       const cleanup = () => { document.body.classList.remove('printing-card'); window.removeEventListener('afterprint', cleanup); };
@@ -556,7 +806,7 @@ export default function Players() {
     const onPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]; if (!file) return;
       if (!file.type.startsWith('image/')) { toast('Le fichier doit être une image', 'error'); return; }
-      if (photo) URL.revokeObjectURL(photo);
+      if (photo.startsWith('blob:')) URL.revokeObjectURL(photo);
       setPhoto(URL.createObjectURL(file));
     };
     return (

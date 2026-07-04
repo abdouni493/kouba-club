@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Settings as SettingsIcon, Building2, UserCog, Database, Save, Upload, Download, Trophy, ShieldCheck } from 'lucide-react';
+import { Settings as SettingsIcon, Building2, UserCog, Database, Save, Upload, Download, Trophy, ShieldCheck, Stamp } from 'lucide-react';
 import { PageHeader, Tabs } from '../components/ui/Display';
 import { Input, Textarea } from '../components/ui/Fields';
 import { useData } from '../context/DataContext';
@@ -18,6 +18,7 @@ export default function Settings() {
   const [tab, setTab] = useState('club');
   const [club, setClub] = useState(data.club);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingCachet, setUploadingCachet] = useState(false);
   const [account, setAccount] = useState({ name: user?.name || '', username: user?.username || '', email: user?.email || '' });
   const [newPassword, setNewPassword] = useState('');
   const [savingAccount, setSavingAccount] = useState(false);
@@ -67,6 +68,23 @@ export default function Settings() {
     }
   };
 
+  // Cachet (official stamp) reuses the same club-logo bucket — no separate bucket.
+  const onCachet = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setUploadingCachet(true);
+    try {
+      const url = await uploadImage('club-logo', file);
+      const updatedClub = { ...club, cachet: url };
+      setClub(updatedClub);
+      patch({ club: updatedClub });
+      toast('Cachet téléversé et enregistré', 'success');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Erreur de téléversement', 'error');
+    } finally {
+      setUploadingCachet(false);
+    }
+  };
+
   const backup = () => { download(`orangefc-backup-${new Date().toISOString().slice(0, 10)}.json`, exportJSON()); toast('Sauvegarde téléchargée', 'success'); };
 
   return (
@@ -80,14 +98,25 @@ export default function Settings() {
 
       {tab === 'club' && (
         <div className="card p-6 max-w-3xl">
-          <div className="flex items-center gap-4 mb-6">
-            <div className="grid h-20 w-20 place-items-center rounded-2xl bg-accent-grad text-black overflow-hidden shadow-glow">
-              {club.logo ? <img src={club.logo} alt="logo" className="h-full w-full object-cover" /> : <Trophy className="h-9 w-9" />}
+          <div className="flex flex-wrap items-center gap-6 mb-6">
+            <div className="flex items-center gap-4">
+              <div className="grid h-20 w-20 place-items-center rounded-2xl bg-accent-grad text-black overflow-hidden shadow-glow">
+                {club.logo ? <img src={club.logo} alt="logo" className="h-full w-full object-cover" /> : <Trophy className="h-9 w-9" />}
+              </div>
+              <label className="btn-ghost cursor-pointer">
+                <Upload className="h-4 w-4" />{uploadingLogo ? 'Envoi…' : t('settings.logo')}
+                <input type="file" accept="image/*" className="hidden" onChange={onLogo} disabled={uploadingLogo} />
+              </label>
             </div>
-            <label className="btn-ghost cursor-pointer">
-              <Upload className="h-4 w-4" />{uploadingLogo ? 'Envoi…' : t('settings.logo')}
-              <input type="file" accept="image/*" className="hidden" onChange={onLogo} disabled={uploadingLogo} />
-            </label>
+            <div className="flex items-center gap-4">
+              <div className="grid h-20 w-20 place-items-center rounded-2xl bg-surface-2 border border-line/10 text-muted overflow-hidden">
+                {club.cachet ? <img src={club.cachet} alt="cachet" className="h-full w-full object-contain p-1" /> : <Stamp className="h-9 w-9" />}
+              </div>
+              <label className="btn-ghost cursor-pointer">
+                <Upload className="h-4 w-4" />{uploadingCachet ? 'Envoi…' : 'Cachet du club'}
+                <input type="file" accept="image/*" className="hidden" onChange={onCachet} disabled={uploadingCachet} />
+              </label>
+            </div>
           </div>
           <div className="grid sm:grid-cols-2 gap-4">
             <Input label={t('common.name')} value={club.name} onChange={(e) => setClub({ ...club, name: e.target.value })} />

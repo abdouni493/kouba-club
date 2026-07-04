@@ -12,6 +12,7 @@ import Modal from '../ui/Modal';
 import { Avatar, Badge } from '../ui/Display';
 import { useData } from '../../context/DataContext';
 import { useLookups } from '../../lib/selectors';
+import { usePermissions } from '../../lib/permissions';
 import { fmtDate, money } from '../../lib/utils';
 import { resolvePlayerByCode, subStatus, type SubStatus } from '../../lib/scan';
 import type { Player } from '../../lib/types';
@@ -171,6 +172,8 @@ const STATUS_META: Record<SubStatus, { tone: string; icon: typeof CheckCircle2; 
 function ScanResultView({ player, code }: { player: Player; code: string }) {
   const { t } = useTranslation();
   const L = useLookups();
+  // Workers scanning a card must not see any prices / payment amounts.
+  const { isAdmin } = usePermissions();
   const a = player.assignedSubscription;
   const tm = a ? L.tm[a.timingId] : undefined;
   const parent = player.parentId ? L.par[player.parentId] : undefined;
@@ -230,9 +233,11 @@ function ScanResultView({ player, code }: { player: Player; code: string }) {
           <div className="rounded-2xl bg-accent/10 border border-accent/20 p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <p className="font-display font-bold text-fg truncate">{tm.name}</p>
-              <Badge tone={a.status === 'payed' ? 'success' : 'warning'}>
-                {a.status === 'payed' ? t('common.paid') : t('players.debt')}
-              </Badge>
+              {isAdmin && (
+                <Badge tone={a.status === 'payed' ? 'success' : 'warning'}>
+                  {a.status === 'payed' ? t('common.paid') : t('players.debt')}
+                </Badge>
+              )}
             </div>
             <p className="text-xs text-muted">
               {L.catName(tm.categoryId)} · {L.grpName(tm.groupId)}
@@ -241,12 +246,14 @@ function ScanResultView({ player, code }: { player: Player; code: string }) {
               <Calendar className="h-4 w-4 text-accent" />
               {fmtDate(a.startDate)} → <span className="font-semibold">{fmtDate(a.expiryDate)}</span>
             </div>
-            <div className="grid grid-cols-3 gap-2.5">
-              <MiniStat label={t('common.price')} value={money(a.price)} />
-              <MiniStat label={t('common.paid')} value={money(a.amountPaid)} />
-              <MiniStat label={t('common.rest')} value={money(a.rest)} danger={a.rest > 0} />
-            </div>
-            {a.rest > 0 && (
+            {isAdmin && (
+              <div className="grid grid-cols-3 gap-2.5">
+                <MiniStat label={t('common.price')} value={money(a.price)} />
+                <MiniStat label={t('common.paid')} value={money(a.amountPaid)} />
+                <MiniStat label={t('common.rest')} value={money(a.rest)} danger={a.rest > 0} />
+              </div>
+            )}
+            {isAdmin && a.rest > 0 && (
               <div className="flex items-center gap-2 rounded-xl bg-danger/10 border border-danger/20 px-3 py-2 text-sm font-semibold text-danger">
                 <CircleDollarSign className="h-4 w-4" />{t('players.debt')}: {money(a.rest)}
               </div>

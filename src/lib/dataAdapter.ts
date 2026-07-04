@@ -9,7 +9,7 @@ import { supabase } from './supabaseClient';
 import type { AppData } from './mockData';
 import type {
   Trainer, Timing, Subscription, Player, Parent, Worker, Expense, CaisseTransaction,
-  Activity, MoneyEntry, StaffPayment, Payment, AssignedSubscription, ClubContact, ClubInfo,
+  Activity, MoneyEntry, StaffPayment, Payment, MedicalRecord, AssignedSubscription, ClubContact, ClubInfo,
 } from './types';
 
 // keys of AppData that are plain arrays managed through add/updateItem/remove
@@ -71,7 +71,7 @@ export function emptyAppData(): AppData {
     trainers: [], timings: [], subscriptions: [], players: [], parents: [], workers: [],
     expenses: [], transactions: [], activities: [],
     contact: { facebook: '', instagram: '', tiktok: '', map: '', phone: '', whatsapp: '', email: '' },
-    club: { logo: '', name: '', description: '', email: '', phone: '', address: '', nif: '', nis: '', article: '', rc: '', regFeeAmount: 0 },
+    club: { logo: '', cachet: '', name: '', description: '', email: '', phone: '', address: '', nif: '', nis: '', article: '', rc: '', regFeeAmount: 0 },
   };
 }
 
@@ -87,6 +87,8 @@ const mapStaffPayment = (r: Row): StaffPayment => ({
 
 const mapPlayerPayment = (r: Row): Payment => ({ id: r.id, date: r.date, amount: r.amount, note: r.note || '', kind: r.kind });
 
+const mapMedicalRecord = (r: Row): MedicalRecord => ({ id: r.id, status: !!r.status, description: r.description || '', date: r.date, doctorId: r.doctor_id || undefined });
+
 const mapSubscription = (r: Row): Subscription => ({
   id: r.id, name: r.name, timingId: r.timing_id || '', periodDays: r.period_days,
   totalSeances: r.total_seances, pricePerSeance: r.price_per_seance, totalPrice: r.total_price,
@@ -98,7 +100,7 @@ const mapTiming = (r: Row): Timing => ({
   days: r.days || [], startTime: r.start_time || '', endTime: r.end_time || '',
 });
 
-function mapPlayer(r: Row, paymentRows: Row[]): Player {
+function mapPlayer(r: Row, paymentRows: Row[], medicalRows: Row[]): Player {
   const assignedSubscription: AssignedSubscription | undefined = r.sub_subscription_id
     ? {
       subscriptionId: r.sub_subscription_id, timingId: r.sub_timing_id, startDate: r.sub_start_date,
@@ -108,10 +110,12 @@ function mapPlayer(r: Row, paymentRows: Row[]): Player {
     : undefined;
   return {
     id: r.id, firstName: r.first_name, lastName: r.last_name, birthDate: r.birth_date || '',
-    birthPlace: r.birth_place || '', phone: r.phone || '', email: r.email || '',
+    birthPlace: r.birth_place || '', address: r.address || '', phone: r.phone || '', email: r.email || '',
     parentId: r.parent_id || undefined, createdAt: r.created_at, subscriptionCostPaid: r.subscription_cost_paid,
+    photoUrl: r.photo_url || '', documentUrls: r.document_urls || [],
     assignedSubscription,
     payments: paymentRows.filter((p) => p.player_id === r.id).map(mapPlayerPayment),
+    medicalRecords: medicalRows.filter((m) => m.player_id === r.id).map(mapMedicalRecord),
   };
 }
 
@@ -153,7 +157,7 @@ function mapWorker(r: Row, moneyRows: Row[], paymentRows: Row[]): Worker {
 const mapExpense = (r: Row): Expense => ({ id: r.id, name: r.name, categoryId: r.category_id || '', description: r.description || '', amount: r.amount, date: r.date });
 const mapTransaction = (r: Row): CaisseTransaction => ({ id: r.id, type: r.type, amount: r.amount, date: r.date, description: r.description || '' });
 const mapActivity = (r: Row): Activity => ({ id: r.id, name: r.name, description: r.description || '', image: r.image || 'grad-1' });
-const mapClub = (r: Row): ClubInfo => ({ logo: r.logo_url || '', name: r.name || '', description: r.description || '', email: r.email || '', phone: r.phone || '', address: r.address || '', nif: r.nif || '', nis: r.nis || '', article: r.article || '', rc: r.rc || '', regFeeAmount: r.reg_fee_amount ?? 0 });
+const mapClub = (r: Row): ClubInfo => ({ logo: r.logo_url || '', cachet: r.cachet_url || '', name: r.name || '', description: r.description || '', email: r.email || '', phone: r.phone || '', address: r.address || '', nif: r.nif || '', nis: r.nis || '', article: r.article || '', rc: r.rc || '', regFeeAmount: r.reg_fee_amount ?? 0 });
 const mapContact = (r: Row): ClubContact => ({ facebook: r.facebook || '', instagram: r.instagram || '', tiktok: r.tiktok || '', map: r.map || '', phone: r.phone || '', whatsapp: r.whatsapp || '', email: r.email || '' });
 
 // ============================== fetching ==============================
@@ -189,6 +193,7 @@ export async function fetchAllData(): Promise<AppData> {
     supabase.from('parents').select('*'),
     supabase.from('players').select('*'),
     supabase.from('player_payments').select('*'),
+    supabase.from('player_medical_records').select('*'),
     supabase.from('workers').select('*'),
     supabase.from('worker_money_entries').select('*'),
     supabase.from('worker_payments').select('*'),
@@ -202,7 +207,7 @@ export async function fetchAllData(): Promise<AppData> {
   const [
     categories, groups, sports, stadiums, roles, expenseCategories,
     trainers, trainerMoney, trainerPayments, timings, subscriptions, parents,
-    players, playerPayments, workers, workerMoney, workerPayments,
+    players, playerPayments, playerMedical, workers, workerMoney, workerPayments,
     expenses, transactions, activities, club, contact,
   ] = results;
 
@@ -217,7 +222,7 @@ export async function fetchAllData(): Promise<AppData> {
     timingsByTrainer.set(tm.trainerId, arr);
   }
 
-  const playersMapped = (players.data || []).map((p) => mapPlayer(p, playerPayments.data || []));
+  const playersMapped = (players.data || []).map((p) => mapPlayer(p, playerPayments.data || [], playerMedical.data || []));
 
   return {
     categories: categories.data || [],
@@ -244,7 +249,7 @@ export async function fetchAllData(): Promise<AppData> {
 
 export async function upsertClub(c: ClubInfo): Promise<void> {
   await checkErr(supabase.from('club_info').upsert({
-    id: 1, logo_url: c.logo, name: c.name, description: c.description, email: c.email, phone: c.phone,
+    id: 1, logo_url: c.logo, cachet_url: c.cachet, name: c.name, description: c.description, email: c.email, phone: c.phone,
     address: c.address, nif: c.nif, nis: c.nis, article: c.article, rc: c.rc, reg_fee_amount: c.regFeeAmount,
   }));
 }
@@ -299,6 +304,19 @@ async function syncPlayerPayments(playerId: string, oldArr: Payment[], newArr: P
   if (toDelete.length) await checkErr(supabase.from('player_payments').delete().in('id', toDelete));
 }
 
+async function syncMedicalRecords(playerId: string, oldArr: MedicalRecord[], newArr: MedicalRecord[]) {
+  const oldIds = new Set(oldArr.map((x) => x.id));
+  const newIds = new Set(newArr.map((x) => x.id));
+  const toInsert = newArr.filter((x) => !oldIds.has(x.id));
+  const toDelete = oldArr.filter((x) => !newIds.has(x.id)).map((x) => x.id);
+  if (toInsert.length) {
+    await checkErr(supabase.from('player_medical_records').insert(toInsert.map((m) => ({
+      id: m.id, player_id: playerId, status: m.status, description: m.description, date: m.date, doctor_id: m.doctorId || null,
+    }))));
+  }
+  if (toDelete.length) await checkErr(supabase.from('player_medical_records').delete().in('id', toDelete));
+}
+
 // ============================== insert ==============================
 
 export async function insertRow<K extends Collections>(key: K, item: AppData[K][number]): Promise<void> {
@@ -346,13 +364,15 @@ export async function insertRow<K extends Collections>(key: K, item: AppData[K][
       const a = p.assignedSubscription;
       await checkErr(supabase.from('players').insert({
         id: p.id, first_name: p.firstName, last_name: p.lastName, birth_date: p.birthDate || null,
-        birth_place: p.birthPlace, phone: p.phone, email: p.email, parent_id: p.parentId || null,
+        birth_place: p.birthPlace, address: p.address || '', phone: p.phone, email: p.email, parent_id: p.parentId || null,
         created_at: p.createdAt, subscription_cost_paid: p.subscriptionCostPaid,
+        photo_url: p.photoUrl || '', document_urls: p.documentUrls || [],
         sub_subscription_id: a?.subscriptionId ?? null, sub_timing_id: a?.timingId ?? null,
         sub_start_date: a?.startDate ?? null, sub_expiry_date: a?.expiryDate ?? null,
         sub_price: a?.price ?? null, sub_amount_paid: a?.amountPaid ?? null, sub_rest: a?.rest ?? null,
         sub_status: a?.status ?? null,
       }));
+      if (p.medicalRecords?.length) await syncMedicalRecords(p.id, [], p.medicalRecords);
       return;
     }
     case 'workers': {
@@ -463,10 +483,13 @@ export async function updateRow<K extends Collections>(key: K, id: string, patch
       if (p.lastName !== undefined) cols.last_name = p.lastName;
       if (p.birthDate !== undefined) cols.birth_date = p.birthDate || null;
       if (p.birthPlace !== undefined) cols.birth_place = p.birthPlace;
+      if (p.address !== undefined) cols.address = p.address;
       if (p.phone !== undefined) cols.phone = p.phone;
       if (p.email !== undefined) cols.email = p.email;
       if ('parentId' in p) cols.parent_id = p.parentId || null;
       if (p.subscriptionCostPaid !== undefined) cols.subscription_cost_paid = p.subscriptionCostPaid;
+      if (p.photoUrl !== undefined) cols.photo_url = p.photoUrl;
+      if (p.documentUrls !== undefined) cols.document_urls = p.documentUrls;
       if ('assignedSubscription' in p) {
         const a = p.assignedSubscription;
         cols.sub_subscription_id = a?.subscriptionId ?? null;
@@ -480,6 +503,7 @@ export async function updateRow<K extends Collections>(key: K, id: string, patch
       }
       if (Object.keys(cols).length) await checkErr(supabase.from('players').update(cols).eq('id', id));
       if (p.payments && prevP) await syncPlayerPayments(id, prevP.payments, p.payments);
+      if (p.medicalRecords && prevP) await syncMedicalRecords(id, prevP.medicalRecords, p.medicalRecords);
       return;
     }
     case 'workers': {

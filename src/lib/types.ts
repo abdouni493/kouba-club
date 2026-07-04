@@ -65,19 +65,31 @@ export interface Payment {
   kind: 'subscription' | 'debt' | 'fee';
 }
 
+export interface MedicalRecord {
+  id: string;
+  status: boolean;   // true = OK / apte (green), false = problème (red)
+  description: string;
+  date: string;
+  doctorId?: string; // set when a doctor recorded it
+}
+
 export interface Player {
   id: string;
   firstName: string;
   lastName: string;
   birthDate: string;
   birthPlace: string;
+  address: string;
   phone: string;
   email: string;
   parentId?: string;
   createdAt: string;
   subscriptionCostPaid: boolean; // one-time registration fee paid or not
+  photoUrl: string;              // player portrait (player-photos bucket)
+  documentUrls: string[];        // scanned documents (player-documents bucket)
   assignedSubscription?: AssignedSubscription;
   payments: Payment[];
+  medicalRecords: MedicalRecord[];
 }
 
 export interface Parent {
@@ -169,6 +181,7 @@ export interface ClubContact {
 
 export interface ClubInfo {
   logo: string;
+  cachet: string; // official stamp/seal (stored in the club-logo bucket)
   name: string;
   description: string;
   email: string;
