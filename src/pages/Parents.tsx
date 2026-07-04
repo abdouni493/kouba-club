@@ -35,17 +35,21 @@ export default function Parents() {
   const openCreate = () => { setEditId(null); setForm(empty); setKidSearch(''); setOpen(true); };
   const openEdit = (p: Parent) => { setEditId(p.id); setForm({ firstName: p.firstName, lastName: p.lastName, phone: p.phone, address: p.address, email: p.email, playerIds: [...p.playerIds] }); setOpen(true); };
 
-  const save = () => {
+  const save = async () => {
     if (!form.firstName || !form.lastName) { toast('Prénom et nom requis', 'error'); return; }
     let pid = editId;
+    // Close the modal first, then persist. For a brand-new parent we must await the
+    // INSERT before linking any players: players.parent_id has a FK to parents(id),
+    // so firing the player UPDATE before the parent row commits triggers a 409
+    // "players_parent_id_fkey" violation.
+    setOpen(false);
     if (editId) { updateItem('parents', editId, { ...form }); toast('Parent mis à jour', 'success'); }
-    else { pid = uid('par'); add('parents', { id: pid, ...form }); toast('Parent créé', 'success'); }
+    else { pid = uid('par'); await add('parents', { id: pid, ...form }); toast('Parent créé', 'success'); }
     data.players.forEach((pl) => {
       const shouldLink = form.playerIds.includes(pl.id);
       if (shouldLink && pl.parentId !== pid) updateItem('players', pl.id, { parentId: pid! });
       if (!shouldLink && pl.parentId === pid) updateItem('players', pl.id, { parentId: undefined });
     });
-    setOpen(false);
   };
 
   const toggleKid = (id: string) => setForm((f) => ({ ...f, playerIds: f.playerIds.includes(id) ? f.playerIds.filter((x) => x !== id) : [...f.playerIds, id] }));
