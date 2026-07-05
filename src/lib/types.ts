@@ -73,6 +73,38 @@ export interface MedicalRecord {
   doctorId?: string; // set when a doctor recorded it
 }
 
+export interface AttendanceRecord {
+  id: string;
+  timingId: string;
+  date: string;
+  status: 'present' | 'absent';
+  scannedAt?: string; // set when the record came from a card scan
+}
+
+export interface PlayerEvaluation {
+  id: string;
+  date: string;
+  // 0–100 scale for each metric
+  speed: number;
+  ballControl: number;
+  dribbling: number;
+  passing: number;
+  fitness: number;
+  discipline: number;
+  description: string;
+}
+
+export interface InsuranceType { id: string; name: string }
+
+export interface PlayerInsurance {
+  id: string;
+  typeId: string;
+  price: number;
+  startDate: string;
+  endDate: string;
+  description: string;
+}
+
 export interface Player {
   id: string;
   firstName: string;
@@ -90,6 +122,9 @@ export interface Player {
   assignedSubscription?: AssignedSubscription;
   payments: Payment[];
   medicalRecords: MedicalRecord[];
+  attendanceRecords: AttendanceRecord[];
+  evaluations: PlayerEvaluation[];
+  insurances: PlayerInsurance[];
 }
 
 export interface Parent {
@@ -140,6 +175,39 @@ export interface Worker {
   username?: string;
   permissions: WorkerPermissions;
   startDate: string;
+  acomptes: MoneyEntry[];
+  absences: MoneyEntry[];
+  payments: StaffPayment[];
+}
+
+export interface MatchExpense {
+  id: string;
+  name: string;   // e.g. Transport, Hôtel, or custom
+  amount: number;
+}
+
+export interface Match {
+  id: string;
+  categoryId: string;
+  stadiumId: string;
+  matchDate: string;
+  opponent: string;
+  description: string; // opponent formation / notes
+  expenses: MatchExpense[];
+  createdAt: string;
+}
+
+export interface Doctor {
+  id: string;
+  fullName: string;
+  phone: string;
+  address: string;
+  payType: 'day' | 'month' | 'session';
+  payAmount: number;
+  accountActive: boolean;
+  email?: string;
+  username?: string;
+  createdAt: string;
   acomptes: MoneyEntry[];
   absences: MoneyEntry[];
   payments: StaffPayment[];

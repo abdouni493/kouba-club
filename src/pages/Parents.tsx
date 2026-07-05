@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
-import { UserSquare2, Plus, Eye, Pencil, Trash2, Mail, Phone, MapPin, Search, X, Users, Check } from 'lucide-react';
+import { UserSquare2, Plus, Eye, Pencil, Trash2, Mail, Phone, MapPin, Search, X, Users, Check, HeartPulse } from 'lucide-react';
 import { PageHeader, Badge, EmptyState, useConfirm, SearchInput, Avatar } from '../components/ui/Display';
 import Modal from '../components/ui/Modal';
 import { Input, Textarea, Segmented } from '../components/ui/Fields';
@@ -152,6 +152,38 @@ export default function Parents() {
                 {detail.playerIds.length === 0 && <p className="text-sm text-muted">Aucun enfant lié</p>}
               </div>
             </div>
+
+            {/* Read-only medical history of each child (set by doctor/admin/worker) */}
+            {detail.playerIds.some((id) => (L.pl[id]?.medicalRecords.length || 0) > 0) && (
+              <div>
+                <p className="label flex items-center gap-2"><HeartPulse className="h-4 w-4" />Historique médical</p>
+                <div className="space-y-3">
+                  {detail.playerIds.map((id) => {
+                    const pl = L.pl[id];
+                    if (!pl || pl.medicalRecords.length === 0) return null;
+                    return (
+                      <div key={id} className="rounded-xl bg-surface-2 p-3">
+                        <p className="text-sm font-semibold text-fg mb-2">{pl.firstName} {pl.lastName}</p>
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                          {[...pl.medicalRecords].sort((x, y) => y.date.localeCompare(x.date)).map((m) => (
+                            <div key={m.id} className="flex items-start gap-2.5 rounded-lg bg-surface-3 p-2.5">
+                              <span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${m.status ? 'bg-success' : 'bg-danger'}`} />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className={`text-xs font-bold ${m.status ? 'text-success' : 'text-danger'}`}>{m.status ? 'Apte' : 'Inapte'}</span>
+                                  <span className="text-xs text-muted">{fmtDate(m.date)}</span>
+                                </div>
+                                {m.description && <p className="text-xs text-fg mt-0.5">{m.description}</p>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Modal>

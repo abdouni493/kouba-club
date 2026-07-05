@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Users, Dumbbell, Ticket, TrendingUp, AlertTriangle, CircleDollarSign, Wallet, Clock } from 'lucide-react';
+import { Users, Dumbbell, Ticket, TrendingUp, AlertTriangle, CircleDollarSign, Wallet, Clock, Shield, Flag, MapPin } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend,
@@ -9,6 +9,7 @@ import { ChartCard, CHART, tooltipStyle } from '../components/ui/Charts';
 import { useData } from '../context/DataContext';
 import { useLookups } from '../lib/selectors';
 import { money, fmtDate, daysUntil } from '../lib/utils';
+import { insuranceStatus } from '../lib/insurance';
 
 const MONTHS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil'];
 
@@ -39,6 +40,16 @@ export default function Dashboard() {
 
   const recentPayments = data.players.flatMap((p) => p.payments.map((pay) => ({ ...pay, player: p })))
     .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
+
+  // Insurance alerts: players with no / expired / soon-expiring insurance.
+  const insuranceAlerts = data.players
+    .map((p) => ({ player: p, ins: insuranceStatus(p) }))
+    .filter(({ ins }) => ins.status !== 'valid');
+
+  // Matches in the next 7 days.
+  const upcomingMatches = data.matches
+    .filter((m) => { const d = daysUntil(m.matchDate); return d >= 0 && d <= 7; })
+    .sort((a, b) => a.matchDate.localeCompare(b.matchDate));
 
   return (
     <div>
@@ -141,6 +152,58 @@ export default function Dashboard() {
                   <p className="text-xs text-muted">{t('players.expiry')}: {fmtDate(p.assignedSubscription!.expiryDate)}</p>
                 </div>
                 <Badge tone="danger">{daysUntil(p.assignedSubscription!.expiryDate)}j</Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {upcomingMatches.length > 0 && (
+        <div className="card p-5 mt-4 border-accent/30">
+          <div className="flex items-center gap-2 mb-3">
+            <Flag className="h-5 w-5 text-accent" />
+            <h3 className="font-display font-bold text-fg">Matchs à venir (7 jours)</h3>
+            <Badge tone="accent">{upcomingMatches.length}</Badge>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {upcomingMatches.map((m) => (
+              <div key={m.id} className="flex items-center gap-3 rounded-xl bg-surface-2 p-3">
+                <div className="grid h-10 w-10 place-items-center rounded-xl bg-accent/15 text-accent shrink-0"><Flag className="h-4 w-4" /></div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-fg truncate">vs {m.opponent || 'Adversaire'}</p>
+                  <p className="text-xs text-muted flex items-center gap-1 truncate">
+                    <MapPin className="h-3 w-3" />{L.stName(m.stadiumId)} · {L.catName(m.categoryId)}
+                  </p>
+                </div>
+                <Badge tone={daysUntil(m.matchDate) === 0 ? 'danger' : 'accent'}>
+                  {daysUntil(m.matchDate) === 0 ? 'Aujourd\'hui' : fmtDate(m.matchDate)}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {insuranceAlerts.length > 0 && (
+        <div className="card p-5 mt-4 border-warning/30">
+          <div className="flex items-center gap-2 mb-3">
+            <Shield className="h-5 w-5 text-warning" />
+            <h3 className="font-display font-bold text-fg">Alertes assurance</h3>
+            <Badge tone="warning">{insuranceAlerts.length}</Badge>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {insuranceAlerts.map(({ player: p, ins }) => (
+              <div key={p.id} className="flex items-center gap-3 rounded-xl bg-surface-2 p-3">
+                <Avatar name={L.playerName(p)} id={p.id} size={38} src={p.photoUrl || undefined} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-fg truncate">{L.playerName(p)}</p>
+                  <p className="text-xs text-muted truncate">
+                    {ins.status === 'none' ? 'Aucune assurance' : ins.status === 'expired' ? `Expirée le ${fmtDate(ins.current!.endDate)}` : `Expire le ${fmtDate(ins.current!.endDate)}`}
+                  </p>
+                </div>
+                <Badge tone={ins.status === 'soon' ? 'warning' : 'danger'}>
+                  {ins.status === 'none' ? 'Sans' : ins.status === 'expired' ? 'Expirée' : `${ins.days}j`}
+                </Badge>
               </div>
             ))}
           </div>

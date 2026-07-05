@@ -23,9 +23,10 @@ export function useLookups() {
     const totalRevenue = data.players.reduce(
       (s, p) => s + p.payments.reduce((a, x) => a + x.amount, 0), 0);
     const totalExpenses = data.expenses.reduce((s, e) => s + e.amount, 0);
+    const totalMatchExpenses = data.matches.reduce((s, m) => s + m.expenses.reduce((a, x) => a + x.amount, 0), 0);
     const cashDeposits = data.transactions.filter((t) => t.type === 'deposit').reduce((s, t) => s + t.amount, 0);
     const cashWithdraws = data.transactions.filter((t) => t.type === 'withdraw').reduce((s, t) => s + t.amount, 0);
-    const cashBalance = cashDeposits - cashWithdraws + totalRevenue - totalExpenses;
+    const cashBalance = cashDeposits - cashWithdraws + totalRevenue - totalExpenses - totalMatchExpenses;
     const totalDebt = data.players.reduce((s, p) => s + (p.assignedSubscription?.rest || 0), 0);
 
     const activeSubs = data.players.filter((p) => p.assignedSubscription && daysUntil(p.assignedSubscription.expiryDate) >= 0).length;
@@ -47,7 +48,7 @@ export function useLookups() {
       timingName: (id?: string) => (id && tm[id]?.name) || '—',
       subName: (id?: string) => (id && sub[id]?.name) || '—',
       playerName, playersOfTiming, playersOfTrainer,
-      totalRevenue, totalExpenses, cashBalance, totalDebt, activeSubs, expiringSoon, expired,
+      totalRevenue, totalExpenses, totalMatchExpenses, cashBalance, totalDebt, activeSubs, expiringSoon, expired,
     };
   }, [data]);
 }

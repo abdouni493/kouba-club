@@ -1,6 +1,7 @@
 import {
   LayoutDashboard, CalendarRange, Ticket, Users, UserSquare2, Dumbbell,
   HardHat, Receipt, Wallet, LineChart, FileBarChart, Settings,
+  ClipboardCheck, Flag, Stethoscope,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 export interface NavItem {
@@ -23,7 +24,11 @@ export const NAV: NavItem[] = [
   },
   {
     key: 'players', path: '/app/players', icon: Users, group: 'management',
-    actions: [{ key: 'view', label: 'Voir détails' }, { key: 'assign', label: 'Assigner abonnement' }, { key: 'card', label: 'Carte' }, { key: 'payDebt', label: 'Payer créance' }, { key: 'edit', label: 'Modifier' }, { key: 'delete', label: 'Supprimer' }],
+    actions: [{ key: 'view', label: 'Voir détails' }, { key: 'assign', label: 'Assigner abonnement' }, { key: 'card', label: 'Carte' }, { key: 'payDebt', label: 'Payer créance' }, { key: 'evaluate', label: 'Évaluation' }, { key: 'edit', label: 'Modifier' }, { key: 'delete', label: 'Supprimer' }],
+  },
+  {
+    key: 'presence', path: '/app/presence', icon: ClipboardCheck, group: 'management',
+    actions: [{ key: 'mark', label: 'Marquer présence/absence' }, { key: 'close', label: 'Clôturer la journée' }],
   },
   {
     key: 'parents', path: '/app/parents', icon: UserSquare2, group: 'management',
@@ -36,6 +41,14 @@ export const NAV: NavItem[] = [
   {
     key: 'workers', path: '/app/workers', icon: HardHat, group: 'management',
     actions: [{ key: 'view', label: 'Voir détails' }, { key: 'permissions', label: 'Permissions' }, { key: 'acompte', label: 'Acomptes' }, { key: 'absence', label: 'Absences' }, { key: 'payment', label: 'Paiement' }, { key: 'edit', label: 'Modifier' }, { key: 'delete', label: 'Supprimer' }],
+  },
+  {
+    key: 'doctors', path: '/app/doctors', icon: Stethoscope, group: 'management',
+    actions: [{ key: 'view', label: 'Voir détails' }, { key: 'acompte', label: 'Acomptes' }, { key: 'absence', label: 'Absences' }, { key: 'payment', label: 'Paiement' }, { key: 'edit', label: 'Modifier' }, { key: 'delete', label: 'Supprimer' }],
+  },
+  {
+    key: 'matches', path: '/app/matches', icon: Flag, group: 'management',
+    actions: [{ key: 'view', label: 'Voir détails' }, { key: 'expenses', label: 'Dépenses' }, { key: 'edit', label: 'Modifier' }, { key: 'delete', label: 'Supprimer' }],
   },
   {
     key: 'expenses', path: '/app/expenses', icon: Receipt, group: 'finance',

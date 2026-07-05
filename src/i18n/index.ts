@@ -4,8 +4,8 @@ import { initReactI18next } from 'react-i18next';
 const fr = {
   nav: {
     dashboard: 'Tableau de bord', planificateur: 'Planificateur', subscriptions: 'Abonnements',
-    players: 'Joueurs', parents: 'Parents', trainers: 'Entraîneurs', website: 'Site web',
-    workers: 'Employés', expenses: 'Dépenses', caisse: 'Caisse', analyse: 'Analyse',
+    players: 'Joueurs', presence: 'Présences', parents: 'Parents', trainers: 'Entraîneurs', website: 'Site web',
+    workers: 'Employés', doctors: 'Médecins', matches: 'Matchs', expenses: 'Dépenses', caisse: 'Caisse', analyse: 'Analyse',
     reports: 'Rapports', settings: 'Paramètres', logout: 'Déconnexion',
     management: 'Gestion', finance: 'Finance', system: 'Système',
   },
@@ -110,7 +110,8 @@ const fr = {
 const ar = {
   nav: {
     dashboard: 'لوحة القيادة', planificateur: 'المُخطِّط', subscriptions: 'الاشتراكات', players: 'اللاعبون',
-    parents: 'الأولياء', trainers: 'المدربون', website: 'الموقع', workers: 'الموظفون', expenses: 'المصاريف',
+    presence: 'الحضور', parents: 'الأولياء', trainers: 'المدربون', website: 'الموقع', workers: 'الموظفون',
+    doctors: 'الأطباء', matches: 'المباريات', expenses: 'المصاريف',
     caisse: 'الصندوق', analyse: 'التحليل', reports: 'التقارير', settings: 'الإعدادات', logout: 'تسجيل الخروج',
     management: 'الإدارة', finance: 'المالية', system: 'النظام',
   },

@@ -10,6 +10,7 @@ import type { AppData } from './mockData';
 import type {
   Trainer, Timing, Subscription, Player, Parent, Worker, Expense, CaisseTransaction,
   Activity, MoneyEntry, StaffPayment, Payment, MedicalRecord, AssignedSubscription, ClubContact, ClubInfo,
+  AttendanceRecord, PlayerEvaluation, PlayerInsurance, Match, MatchExpense, Doctor,
 } from './types';
 
 // keys of AppData that are plain arrays managed through add/updateItem/remove
@@ -24,19 +25,22 @@ const TABLE_MAP: Record<Collections, string> = {
   stadiums: 'stadiums',
   roles: 'roles',
   expenseCategories: 'expense_categories',
+  insuranceTypes: 'insurance_types',
   trainers: 'trainers',
   timings: 'timings',
   subscriptions: 'subscriptions',
   players: 'players',
   parents: 'parents',
   workers: 'workers',
+  doctors: 'doctors',
+  matches: 'matches',
   expenses: 'expenses',
   transactions: 'caisse_transactions',
   activities: 'activities',
 };
 
 const NAME_ONLY: ReadonlySet<Collections> = new Set([
-  'categories', 'groups', 'sports', 'stadiums', 'roles', 'expenseCategories',
+  'categories', 'groups', 'sports', 'stadiums', 'roles', 'expenseCategories', 'insuranceTypes',
 ]);
 
 // Mirrors the `on delete set null` foreign keys in supabase/schema.sql. When a row in one
@@ -45,10 +49,10 @@ const NAME_ONLY: ReadonlySet<Collections> = new Set([
 // dependent row would resend the stale id and fail with a foreign-key violation. Applied
 // locally after a successful delete in DataContext.remove() to keep the cache consistent.
 export const CASCADE_SET_NULL: Partial<Record<Collections, { collection: Collections; field: string }[]>> = {
-  categories: [{ collection: 'timings', field: 'categoryId' }],
+  categories: [{ collection: 'timings', field: 'categoryId' }, { collection: 'matches', field: 'categoryId' }],
   groups: [{ collection: 'timings', field: 'groupId' }],
   sports: [{ collection: 'timings', field: 'sportId' }],
-  stadiums: [{ collection: 'timings', field: 'stadiumId' }],
+  stadiums: [{ collection: 'timings', field: 'stadiumId' }, { collection: 'matches', field: 'stadiumId' }],
   trainers: [{ collection: 'timings', field: 'trainerId' }],
   timings: [{ collection: 'subscriptions', field: 'timingId' }],
   parents: [{ collection: 'players', field: 'parentId' }],
@@ -67,8 +71,8 @@ async function checkErr<T extends { error: { message: string } | null }>(p: Prom
 
 export function emptyAppData(): AppData {
   return {
-    categories: [], groups: [], sports: [], stadiums: [], roles: [], expenseCategories: [],
-    trainers: [], timings: [], subscriptions: [], players: [], parents: [], workers: [],
+    categories: [], groups: [], sports: [], stadiums: [], roles: [], expenseCategories: [], insuranceTypes: [],
+    trainers: [], timings: [], subscriptions: [], players: [], parents: [], workers: [], doctors: [], matches: [],
     expenses: [], transactions: [], activities: [],
     contact: { facebook: '', instagram: '', tiktok: '', map: '', phone: '', whatsapp: '', email: '' },
     club: { logo: '', cachet: '', name: '', description: '', email: '', phone: '', address: '', nif: '', nis: '', article: '', rc: '', regFeeAmount: 0 },
@@ -89,6 +93,40 @@ const mapPlayerPayment = (r: Row): Payment => ({ id: r.id, date: r.date, amount:
 
 const mapMedicalRecord = (r: Row): MedicalRecord => ({ id: r.id, status: !!r.status, description: r.description || '', date: r.date, doctorId: r.doctor_id || undefined });
 
+const mapAttendanceRecord = (r: Row): AttendanceRecord => ({ id: r.id, timingId: r.timing_id || '', date: r.date, status: r.status, scannedAt: r.scanned_at || undefined });
+
+const mapPlayerEvaluation = (r: Row): PlayerEvaluation => ({
+  id: r.id, date: r.date, speed: r.speed ?? 0, ballControl: r.ball_control ?? 0, dribbling: r.dribbling ?? 0,
+  passing: r.passing ?? 0, fitness: r.fitness ?? 0, discipline: r.discipline ?? 0, description: r.description || '',
+});
+
+const mapPlayerInsurance = (r: Row): PlayerInsurance => ({
+  id: r.id, typeId: r.type_id || '', price: r.price ?? 0, startDate: r.start_date, endDate: r.end_date, description: r.description || '',
+});
+
+const mapMatchExpense = (r: Row): MatchExpense => ({ id: r.id, name: r.name, amount: r.amount ?? 0 });
+
+function mapMatch(r: Row, expenseRows: Row[]): Match {
+  return {
+    id: r.id, categoryId: r.category_id || '', stadiumId: r.stadium_id || '', matchDate: r.match_date,
+    opponent: r.opponent || '', description: r.description || '',
+    expenses: expenseRows.filter((e) => e.match_id === r.id).map(mapMatchExpense),
+    createdAt: r.created_at,
+  };
+}
+
+function mapDoctor(r: Row, moneyRows: Row[], paymentRows: Row[]): Doctor {
+  const mine = moneyRows.filter((m) => m.doctor_id === r.id);
+  return {
+    id: r.id, fullName: r.full_name, phone: r.phone || '', address: r.address || '',
+    payType: r.pay_type, payAmount: r.pay_amount ?? 0, accountActive: r.account_active,
+    email: r.email || undefined, username: r.username || undefined, createdAt: r.created_at,
+    acomptes: mine.filter((m) => m.kind === 'acompte').map(mapMoneyEntry),
+    absences: mine.filter((m) => m.kind === 'absence').map(mapMoneyEntry),
+    payments: paymentRows.filter((p) => p.doctor_id === r.id).map(mapStaffPayment),
+  };
+}
+
 const mapSubscription = (r: Row): Subscription => ({
   id: r.id, name: r.name, timingId: r.timing_id || '', periodDays: r.period_days,
   totalSeances: r.total_seances, pricePerSeance: r.price_per_seance, totalPrice: r.total_price,
@@ -100,7 +138,15 @@ const mapTiming = (r: Row): Timing => ({
   days: r.days || [], startTime: r.start_time || '', endTime: r.end_time || '',
 });
 
-function mapPlayer(r: Row, paymentRows: Row[], medicalRows: Row[]): Player {
+interface PlayerChildRows {
+  payments: Row[];
+  medical: Row[];
+  attendance: Row[];
+  evaluations: Row[];
+  insurances: Row[];
+}
+
+function mapPlayer(r: Row, rel: PlayerChildRows): Player {
   const assignedSubscription: AssignedSubscription | undefined = r.sub_subscription_id
     ? {
       subscriptionId: r.sub_subscription_id, timingId: r.sub_timing_id, startDate: r.sub_start_date,
@@ -114,8 +160,11 @@ function mapPlayer(r: Row, paymentRows: Row[], medicalRows: Row[]): Player {
     parentId: r.parent_id || undefined, createdAt: r.created_at, subscriptionCostPaid: r.subscription_cost_paid,
     photoUrl: r.photo_url || '', documentUrls: r.document_urls || [],
     assignedSubscription,
-    payments: paymentRows.filter((p) => p.player_id === r.id).map(mapPlayerPayment),
-    medicalRecords: medicalRows.filter((m) => m.player_id === r.id).map(mapMedicalRecord),
+    payments: rel.payments.filter((p) => p.player_id === r.id).map(mapPlayerPayment),
+    medicalRecords: rel.medical.filter((m) => m.player_id === r.id).map(mapMedicalRecord),
+    attendanceRecords: rel.attendance.filter((a) => a.player_id === r.id).map(mapAttendanceRecord),
+    evaluations: rel.evaluations.filter((e) => e.player_id === r.id).map(mapPlayerEvaluation),
+    insurances: rel.insurances.filter((i) => i.player_id === r.id).map(mapPlayerInsurance),
   };
 }
 
@@ -185,6 +234,7 @@ export async function fetchAllData(): Promise<AppData> {
     supabase.from('stadiums').select('*'),
     supabase.from('roles').select('*'),
     supabase.from('expense_categories').select('*'),
+    supabase.from('insurance_types').select('*'),
     supabase.from('trainers').select('*'),
     supabase.from('trainer_money_entries').select('*'),
     supabase.from('trainer_payments').select('*'),
@@ -194,9 +244,17 @@ export async function fetchAllData(): Promise<AppData> {
     supabase.from('players').select('*'),
     supabase.from('player_payments').select('*'),
     supabase.from('player_medical_records').select('*'),
+    supabase.from('attendance_records').select('*'),
+    supabase.from('player_evaluations').select('*'),
+    supabase.from('player_insurances').select('*'),
     supabase.from('workers').select('*'),
     supabase.from('worker_money_entries').select('*'),
     supabase.from('worker_payments').select('*'),
+    supabase.from('doctors').select('*'),
+    supabase.from('doctor_money_entries').select('*'),
+    supabase.from('doctor_payments').select('*'),
+    supabase.from('matches').select('*'),
+    supabase.from('match_expenses').select('*'),
     supabase.from('expenses').select('*'),
     supabase.from('caisse_transactions').select('*'),
     supabase.from('activities').select('*'),
@@ -205,10 +263,11 @@ export async function fetchAllData(): Promise<AppData> {
   ] as const);
 
   const [
-    categories, groups, sports, stadiums, roles, expenseCategories,
+    categories, groups, sports, stadiums, roles, expenseCategories, insuranceTypes,
     trainers, trainerMoney, trainerPayments, timings, subscriptions, parents,
-    players, playerPayments, playerMedical, workers, workerMoney, workerPayments,
-    expenses, transactions, activities, club, contact,
+    players, playerPayments, playerMedical, playerAttendance, playerEvaluations, playerInsurances,
+    workers, workerMoney, workerPayments, doctors, doctorMoney, doctorPayments,
+    matches, matchExpenses, expenses, transactions, activities, club, contact,
   ] = results;
 
   for (const r of results) if (r.error) throw new Error(r.error.message);
@@ -222,7 +281,13 @@ export async function fetchAllData(): Promise<AppData> {
     timingsByTrainer.set(tm.trainerId, arr);
   }
 
-  const playersMapped = (players.data || []).map((p) => mapPlayer(p, playerPayments.data || [], playerMedical.data || []));
+  const playersMapped = (players.data || []).map((p) => mapPlayer(p, {
+    payments: playerPayments.data || [],
+    medical: playerMedical.data || [],
+    attendance: playerAttendance.data || [],
+    evaluations: playerEvaluations.data || [],
+    insurances: playerInsurances.data || [],
+  }));
 
   return {
     categories: categories.data || [],
@@ -231,12 +296,15 @@ export async function fetchAllData(): Promise<AppData> {
     stadiums: stadiums.data || [],
     roles: roles.data || [],
     expenseCategories: expenseCategories.data || [],
+    insuranceTypes: insuranceTypes.data || [],
     trainers: (trainers.data || []).map((t) => mapTrainer(t, trainerMoney.data || [], trainerPayments.data || [], timingsByTrainer)),
     timings: timingsMapped,
     subscriptions: (subscriptions.data || []).map(mapSubscription),
     players: playersMapped,
     parents: (parents.data || []).map((p) => mapParent(p, playersMapped)),
     workers: (workers.data || []).map((w) => mapWorker(w, workerMoney.data || [], workerPayments.data || [])),
+    doctors: (doctors.data || []).map((d) => mapDoctor(d, doctorMoney.data || [], doctorPayments.data || [])),
+    matches: (matches.data || []).map((m) => mapMatch(m, matchExpenses.data || [])),
     expenses: (expenses.data || []).map(mapExpense),
     transactions: (transactions.data || []).map(mapTransaction),
     activities: (activities.data || []).map(mapActivity),
@@ -317,6 +385,71 @@ async function syncMedicalRecords(playerId: string, oldArr: MedicalRecord[], new
   if (toDelete.length) await checkErr(supabase.from('player_medical_records').delete().in('id', toDelete));
 }
 
+// Deletes run BEFORE inserts here: attendance_records has a unique (player_id,
+// timing_id, date) constraint, and a manual override replaces the old record
+// with a new id for the same day — the old row must be gone before the insert.
+async function syncAttendanceRecords(playerId: string, oldArr: AttendanceRecord[], newArr: AttendanceRecord[]) {
+  const oldById = new Map(oldArr.map((x) => [x.id, x]));
+  const newIds = new Set(newArr.map((x) => x.id));
+  const toInsert = newArr.filter((x) => !oldById.has(x.id));
+  const toDelete = oldArr.filter((x) => !newIds.has(x.id)).map((x) => x.id);
+  const toUpdate = newArr.filter((x) => {
+    const prev = oldById.get(x.id);
+    return prev && (prev.status !== x.status || prev.scannedAt !== x.scannedAt);
+  });
+  if (toDelete.length) await checkErr(supabase.from('attendance_records').delete().in('id', toDelete));
+  for (const a of toUpdate) {
+    await checkErr(supabase.from('attendance_records').update({ status: a.status, scanned_at: a.scannedAt || null }).eq('id', a.id));
+  }
+  if (toInsert.length) {
+    await checkErr(supabase.from('attendance_records').insert(toInsert.map((a) => ({
+      id: a.id, player_id: playerId, timing_id: a.timingId || null, date: a.date, status: a.status, scanned_at: a.scannedAt || null,
+    }))));
+  }
+}
+
+async function syncPlayerEvaluations(playerId: string, oldArr: PlayerEvaluation[], newArr: PlayerEvaluation[]) {
+  const oldIds = new Set(oldArr.map((x) => x.id));
+  const newIds = new Set(newArr.map((x) => x.id));
+  const toInsert = newArr.filter((x) => !oldIds.has(x.id));
+  const toDelete = oldArr.filter((x) => !newIds.has(x.id)).map((x) => x.id);
+  if (toInsert.length) {
+    await checkErr(supabase.from('player_evaluations').insert(toInsert.map((e) => ({
+      id: e.id, player_id: playerId, date: e.date, speed: e.speed, ball_control: e.ballControl,
+      dribbling: e.dribbling, passing: e.passing, fitness: e.fitness, discipline: e.discipline,
+      description: e.description,
+    }))));
+  }
+  if (toDelete.length) await checkErr(supabase.from('player_evaluations').delete().in('id', toDelete));
+}
+
+async function syncPlayerInsurances(playerId: string, oldArr: PlayerInsurance[], newArr: PlayerInsurance[]) {
+  const oldIds = new Set(oldArr.map((x) => x.id));
+  const newIds = new Set(newArr.map((x) => x.id));
+  const toInsert = newArr.filter((x) => !oldIds.has(x.id));
+  const toDelete = oldArr.filter((x) => !newIds.has(x.id)).map((x) => x.id);
+  if (toInsert.length) {
+    await checkErr(supabase.from('player_insurances').insert(toInsert.map((i) => ({
+      id: i.id, player_id: playerId, type_id: i.typeId || null, price: i.price,
+      start_date: i.startDate, end_date: i.endDate, description: i.description,
+    }))));
+  }
+  if (toDelete.length) await checkErr(supabase.from('player_insurances').delete().in('id', toDelete));
+}
+
+async function syncMatchExpenses(matchId: string, oldArr: MatchExpense[], newArr: MatchExpense[]) {
+  const oldIds = new Set(oldArr.map((x) => x.id));
+  const newIds = new Set(newArr.map((x) => x.id));
+  const toInsert = newArr.filter((x) => !oldIds.has(x.id));
+  const toDelete = oldArr.filter((x) => !newIds.has(x.id)).map((x) => x.id);
+  if (toInsert.length) {
+    await checkErr(supabase.from('match_expenses').insert(toInsert.map((e) => ({
+      id: e.id, match_id: matchId, name: e.name, amount: e.amount,
+    }))));
+  }
+  if (toDelete.length) await checkErr(supabase.from('match_expenses').delete().in('id', toDelete));
+}
+
 // ============================== insert ==============================
 
 export async function insertRow<K extends Collections>(key: K, item: AppData[K][number]): Promise<void> {
@@ -373,6 +506,27 @@ export async function insertRow<K extends Collections>(key: K, item: AppData[K][
         sub_status: a?.status ?? null,
       }));
       if (p.medicalRecords?.length) await syncMedicalRecords(p.id, [], p.medicalRecords);
+      if (p.attendanceRecords?.length) await syncAttendanceRecords(p.id, [], p.attendanceRecords);
+      if (p.evaluations?.length) await syncPlayerEvaluations(p.id, [], p.evaluations);
+      if (p.insurances?.length) await syncPlayerInsurances(p.id, [], p.insurances);
+      return;
+    }
+    case 'matches': {
+      const m = item as Match;
+      await checkErr(supabase.from('matches').insert({
+        id: m.id, category_id: m.categoryId || null, stadium_id: m.stadiumId || null,
+        match_date: m.matchDate, opponent: m.opponent, description: m.description, created_at: m.createdAt,
+      }));
+      if (m.expenses?.length) await syncMatchExpenses(m.id, [], m.expenses);
+      return;
+    }
+    case 'doctors': {
+      const d = item as Doctor;
+      await checkErr(supabase.from('doctors').insert({
+        id: d.id, full_name: d.fullName, phone: d.phone, address: d.address,
+        pay_type: d.payType, pay_amount: d.payAmount, account_active: false, email: null, username: null,
+        created_at: d.createdAt,
+      }));
       return;
     }
     case 'workers': {
@@ -504,6 +658,39 @@ export async function updateRow<K extends Collections>(key: K, id: string, patch
       if (Object.keys(cols).length) await checkErr(supabase.from('players').update(cols).eq('id', id));
       if (p.payments && prevP) await syncPlayerPayments(id, prevP.payments, p.payments);
       if (p.medicalRecords && prevP) await syncMedicalRecords(id, prevP.medicalRecords, p.medicalRecords);
+      if (p.attendanceRecords && prevP) await syncAttendanceRecords(id, prevP.attendanceRecords, p.attendanceRecords);
+      if (p.evaluations && prevP) await syncPlayerEvaluations(id, prevP.evaluations, p.evaluations);
+      if (p.insurances && prevP) await syncPlayerInsurances(id, prevP.insurances, p.insurances);
+      return;
+    }
+    case 'matches': {
+      const p = patch as Partial<Match>;
+      const prevM = prev as Match | undefined;
+      const cols: Row = {};
+      if (p.categoryId !== undefined) cols.category_id = p.categoryId || null;
+      if (p.stadiumId !== undefined) cols.stadium_id = p.stadiumId || null;
+      if (p.matchDate !== undefined) cols.match_date = p.matchDate;
+      if (p.opponent !== undefined) cols.opponent = p.opponent;
+      if (p.description !== undefined) cols.description = p.description;
+      if (Object.keys(cols).length) await checkErr(supabase.from('matches').update(cols).eq('id', id));
+      if (p.expenses && prevM) await syncMatchExpenses(id, prevM.expenses, p.expenses);
+      return;
+    }
+    case 'doctors': {
+      const p = patch as Partial<Doctor>;
+      const prevD = prev as Doctor | undefined;
+      const cols: Row = {};
+      if (p.fullName !== undefined) cols.full_name = p.fullName;
+      if (p.phone !== undefined) cols.phone = p.phone;
+      if (p.address !== undefined) cols.address = p.address;
+      if (p.payType !== undefined) cols.pay_type = p.payType;
+      if (p.payAmount !== undefined) cols.pay_amount = p.payAmount;
+      // email / username / accountActive only change through
+      // admin_upsert_doctor_account (keeps the Supabase Auth login in sync).
+      if (Object.keys(cols).length) await checkErr(supabase.from('doctors').update(cols).eq('id', id));
+      if (p.acomptes && prevD) await syncMoneyEntries('doctor_money_entries', 'doctor_id', id, 'acompte', prevD.acomptes, p.acomptes);
+      if (p.absences && prevD) await syncMoneyEntries('doctor_money_entries', 'doctor_id', id, 'absence', prevD.absences, p.absences);
+      if (p.payments && prevD) await syncStaffPayments('doctor_payments', 'doctor_id', id, prevD.payments, p.payments);
       return;
     }
     case 'workers': {
@@ -567,6 +754,10 @@ export async function updateRow<K extends Collections>(key: K, id: string, patch
 export async function deleteRow(key: Collections, id: string): Promise<void> {
   if (key === 'workers') {
     await checkErr(supabase.rpc('admin_delete_worker', { p_worker_id: id }));
+    return;
+  }
+  if (key === 'doctors') {
+    await checkErr(supabase.rpc('admin_delete_doctor', { p_doctor_id: id }));
     return;
   }
   await checkErr(supabase.from(TABLE_MAP[key]).delete().eq('id', id));

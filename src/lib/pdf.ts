@@ -1,5 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import JsBarcode from 'jsbarcode';
+import dayjs from 'dayjs';
 import type { ClubInfo, Player, Parent } from './types';
 import type { useLookups } from './selectors';
 import { money, fmtDate, today } from './utils';
@@ -286,4 +288,206 @@ export async function buildPlayerSubscriptionPdf(club: ClubInfo, player: Player,
   const base64 = raw.substring(raw.indexOf('base64,') + 'base64,'.length);
   const filename = `fiche-${player.lastName}-${player.firstName}.pdf`.replace(/\s+/g, '-');
   return { base64, filename };
+}
+
+// ============================================================================
+// Subscription invoice — a second, more formal template made for PRINTING
+// (invoice number + barcode + club cachet). The emailed "fiche membre" above
+// is untouched; this one is opened in a print-ready tab after an assignment.
+// ============================================================================
+
+export interface InvoicePdfResult extends PdfResult {
+  blobUrl: string;
+  invoiceNumber: string;
+}
+
+/** Code128 barcode rendered on an offscreen canvas, as a PNG data-url. */
+function barcodePng(value: string): string | null {
+  try {
+    const canvas = document.createElement('canvas');
+    JsBarcode(canvas, value, { format: 'CODE128', displayValue: false, margin: 0, width: 2, height: 46, background: '#ffffff', lineColor: '#1c1917' });
+    return canvas.toDataURL('image/png');
+  } catch {
+    return null;
+  }
+}
+
+export async function buildSubscriptionInvoicePdf(club: ClubInfo, player: Player, parent: Parent | undefined, L: Lookups): Promise<InvoicePdfResult> {
+  const a = player.assignedSubscription;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  // Invoice number: date-based + short id — no DB column needed.
+  const baseDate = a?.startDate || today();
+  const invoiceNumber = `INV-${dayjs(baseDate).format('YYYYMMDD')}-${player.id.slice(-5).toUpperCase()}`;
+
+  // ---- Header band ----
+  doc.setFillColor(28, 25, 23); // near-black formal header
+  doc.rect(0, 0, pageWidth, 110, 'F');
+  doc.setFillColor(...ACCENT);
+  doc.rect(0, 110, pageWidth, 5, 'F');
+
+  const logo = club.logo ? await fetchLogoBase64(club.logo) : null;
+  if (logo) {
+    try { doc.addImage(logo, 40, 28, 54, 54); } catch { /* skip */ }
+  }
+  const headX = logo ? 108 : 40;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(19);
+  doc.setTextColor(255, 255, 255);
+  doc.text(club.name || 'Club', headX, 52);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(200, 198, 196);
+  doc.text(club.address || '', headX, 66);
+  doc.text([club.phone && `Tél : ${club.phone}`, club.email].filter(Boolean).join('   ·   '), headX, 78);
+  const ids = [club.nif && `NIF ${club.nif}`, club.nis && `NIS ${club.nis}`, club.rc && `RC ${club.rc}`, club.article && `Art. ${club.article}`].filter(Boolean).join('   ·   ');
+  if (ids) doc.text(ids, headX, 90);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(24);
+  doc.setTextColor(...ACCENT_SOFT);
+  doc.text('FACTURE', pageWidth - 40, 50, { align: 'right' });
+  doc.setFontSize(10);
+  doc.setTextColor(255, 255, 255);
+  doc.text(invoiceNumber, pageWidth - 40, 66, { align: 'right' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(200, 198, 196);
+  doc.text(`Émise le ${fmtDate(today())}`, pageWidth - 40, 80, { align: 'right' });
+
+  // ---- Barcode (encodes the invoice number) ----
+  const barcode = barcodePng(invoiceNumber);
+  if (barcode) {
+    try {
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(pageWidth - 210, 126, 170, 52, 4, 4, 'F');
+      doc.setDrawColor(230, 230, 230);
+      doc.roundedRect(pageWidth - 210, 126, 170, 52, 4, 4, 'S');
+      doc.addImage(barcode, 'PNG', pageWidth - 202, 132, 154, 30);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(120, 113, 108);
+      doc.text(invoiceNumber, pageWidth - 125, 172, { align: 'center' });
+    } catch { /* skip */ }
+  }
+
+  // ---- Billed-to block ----
+  const billY = 135;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...ACCENT_STRONG);
+  doc.text('FACTURÉ À', 40, billY);
+  doc.setFontSize(12);
+  doc.setTextColor(28, 25, 23);
+  doc.text(L.playerName(player), 40, billY + 18);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(120, 113, 108);
+  const billLines = [
+    player.address && `Adresse : ${player.address}`,
+    player.phone && `Tél : ${player.phone}`,
+    parent && `Parent / Tuteur : ${parent.firstName} ${parent.lastName}${parent.phone ? ` (${parent.phone})` : ''}`,
+  ].filter(Boolean) as string[];
+  billLines.forEach((line, i) => doc.text(line, 40, billY + 34 + i * 13));
+
+  // ---- Line items ----
+  const tableY = 205;
+  const rows: string[][] = [];
+  if (a) {
+    rows.push([
+      `Abonnement — ${L.timingName(a.timingId)}`,
+      `${fmtDate(a.startDate)} au ${fmtDate(a.expiryDate)}`,
+      money(a.price),
+    ]);
+  }
+  const feePayment = player.payments.find((p) => p.kind === 'fee');
+  if (feePayment) {
+    rows.push([`Frais d'inscription`, fmtDate(feePayment.date), money(feePayment.amount)]);
+  }
+  if (rows.length === 0) rows.push(['Aucun abonnement actif', '—', money(0)]);
+
+  autoTable(doc, {
+    startY: tableY,
+    head: [['Désignation', 'Période', 'Montant']],
+    body: rows,
+    headStyles: { fillColor: [28, 25, 23], textColor: [255, 255, 255], fontSize: 10, fontStyle: 'bold' },
+    bodyStyles: { textColor: [28, 25, 23], fontSize: 10, cellPadding: 8 },
+    columnStyles: { 2: { halign: 'right', fontStyle: 'bold' } },
+    alternateRowStyles: { fillColor: [250, 250, 250] },
+    margin: { left: 40, right: 40 },
+    theme: 'grid',
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const afterTableY = (doc as any).lastAutoTable?.finalY ?? tableY + 80;
+
+  // ---- Totals block (right-aligned) ----
+  const totalPrice = (a?.price ?? 0) + (feePayment?.amount ?? 0);
+  const totalPaid = (a?.amountPaid ?? 0) + (feePayment?.amount ?? 0);
+  const rest = a?.rest ?? 0;
+  const totX = pageWidth - 250;
+  let ty = afterTableY + 22;
+  const totalLine = (label: string, value: string, strong = false, color: [number, number, number] = [28, 25, 23]) => {
+    doc.setFont('helvetica', strong ? 'bold' : 'normal');
+    doc.setFontSize(strong ? 11 : 9.5);
+    doc.setTextColor(120, 113, 108);
+    doc.text(label, totX, ty);
+    doc.setTextColor(...color);
+    doc.text(value, pageWidth - 40, ty, { align: 'right' });
+    ty += strong ? 20 : 16;
+  };
+  totalLine('Total', money(totalPrice));
+  totalLine('Montant payé', money(totalPaid), false, [21, 128, 61]);
+  doc.setDrawColor(...ACCENT);
+  doc.setLineWidth(1.2);
+  doc.line(totX, ty - 8, pageWidth - 40, ty - 8);
+  ty += 4;
+  totalLine('Reste à payer', money(rest), true, rest > 0 ? [185, 28, 28] : [21, 128, 61]);
+
+  if (rest > 0) {
+    doc.setFillColor(254, 226, 226);
+    doc.roundedRect(totX, ty, 210, 18, 4, 4, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(185, 28, 28);
+    doc.text('CRÉANCE EN COURS', totX + 10, ty + 12);
+  } else {
+    doc.setFillColor(220, 252, 231);
+    doc.roundedRect(totX, ty, 210, 18, 4, 4, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(21, 128, 61);
+    doc.text('FACTURE ACQUITTÉE', totX + 10, ty + 12);
+  }
+
+  // ---- Signature / cachet area ----
+  const sigY = Math.max(ty + 70, pageHeight - 200);
+  doc.setDrawColor(230, 230, 230);
+  doc.setLineWidth(1);
+  doc.line(40, sigY, 250, sigY);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(120, 113, 108);
+  doc.text('Cachet & signature du club', 40, sigY + 14);
+
+  const cachet = club.cachet ? await fetchLogoBase64(club.cachet) : null;
+  if (cachet) {
+    try { doc.addImage(cachet, 60, sigY - 90, 85, 85); } catch { /* skip */ }
+  }
+
+  // ---- Footer ----
+  doc.setFillColor(...ACCENT);
+  doc.rect(0, pageHeight - 26, pageWidth, 26, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text(`${club.name || 'Club'} — Merci de votre confiance`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+
+  const raw = doc.output('datauristring');
+  const base64 = raw.substring(raw.indexOf('base64,') + 'base64,'.length);
+  const filename = `facture-${invoiceNumber}.pdf`;
+  const blobUrl = doc.output('bloburl').toString();
+  return { base64, filename, blobUrl, invoiceNumber };
 }

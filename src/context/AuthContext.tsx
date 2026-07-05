@@ -6,8 +6,9 @@ export interface SessionUser {
   name: string;
   username: string;
   email: string;
-  role: 'admin' | 'worker';
+  role: 'admin' | 'worker' | 'doctor';
   workerId?: string; // workers.id, only set when role === 'worker'
+  doctorId?: string; // doctors.id, only set when role === 'doctor'
 }
 
 interface Result {
@@ -59,6 +60,19 @@ async function loadSessionUser(): Promise<SessionUser | null> {
         return null;
       }
       return { id: profile.id, name: profile.full_name, username: profile.username, email: profile.email, role: 'worker', workerId: worker.id };
+    }
+
+    if (profile.role === 'doctor') {
+      const { data: doctor } = await supabase
+        .from('doctors')
+        .select('id, account_active')
+        .eq('auth_user_id', authUser.id)
+        .maybeSingle();
+      if (!doctor || !doctor.account_active) {
+        await supabase.auth.signOut();
+        return null;
+      }
+      return { id: profile.id, name: profile.full_name, username: profile.username, email: profile.email, role: 'doctor', doctorId: doctor.id };
     }
 
     return { id: profile.id, name: profile.full_name, username: profile.username, email: profile.email, role: 'admin' };

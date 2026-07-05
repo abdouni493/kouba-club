@@ -4,7 +4,7 @@ import dayjs from 'dayjs';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileBarChart, Sparkles, ChevronDown, Users, UserSquare2, Dumbbell, HardHat,
-  Receipt, Wallet, CircleDollarSign, Ticket, Printer,
+  Receipt, Wallet, CircleDollarSign, Ticket, Printer, Shield, Flag,
 } from 'lucide-react';
 import { PageHeader, StatCard, Badge } from '../components/ui/Display';
 import { Input, Select } from '../components/ui/Fields';
@@ -34,8 +34,17 @@ export default function Reports() {
 
   const revenue = payments.reduce((s, p) => s + p.amount, 0);
   const totalExp = expenses.reduce((s, e) => s + e.amount, 0);
-  const staffOut = [...trainerPays, ...workerPays].reduce((s, p) => s + p.amount, 0);
+  const staffOut = [...trainerPays, ...workerPays, ...data.doctors.flatMap((d) => d.payments).filter((x) => inR(x.date))].reduce((s, p) => s + p.amount, 0);
   const totalDebt = players.reduce((s, p) => s + (p.assignedSubscription?.rest || 0), 0);
+
+  // Insurance subscribed in the period (assurance cost line).
+  const insurances = data.players.flatMap((p) => p.insurances.map((i) => ({ ...i, player: p }))).filter((i) => inR(i.startDate));
+  const insTotal = insurances.reduce((s, i) => s + i.price, 0);
+
+  // Match expenses in the period — a separate cost stream folded into the totals.
+  const matchesInR = data.matches.filter((m) => inR(m.matchDate));
+  const matchExpRows = matchesInR.flatMap((m) => m.expenses.map((e) => ({ ...e, match: m })));
+  const matchExpTotal = matchExpRows.reduce((s, e) => s + e.amount, 0);
 
   return (
     <div>
@@ -61,9 +70,9 @@ export default function Reports() {
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard label={t('dash.revenue')} value={money(revenue)} icon={<CircleDollarSign className="h-5 w-5" />} tone="success" />
-            <StatCard label={t('expenses.title')} value={money(totalExp)} icon={<Receipt className="h-5 w-5" />} tone="danger" />
+            <StatCard label={t('expenses.title')} value={money(totalExp + matchExpTotal)} sub={matchExpTotal > 0 ? `dont matchs : ${money(matchExpTotal)}` : undefined} icon={<Receipt className="h-5 w-5" />} tone="danger" />
             <StatCard label="Salaires" value={money(staffOut)} icon={<Wallet className="h-5 w-5" />} tone="warning" />
-            <StatCard label="Bénéfice net" value={money(revenue - totalExp - staffOut)} icon={<FileBarChart className="h-5 w-5" />} tone="accent" />
+            <StatCard label="Bénéfice net" value={money(revenue - totalExp - matchExpTotal - staffOut)} icon={<FileBarChart className="h-5 w-5" />} tone="accent" />
           </div>
 
           <Section title={t('nav.players')} icon={<Users className="h-4 w-4" />} stat={`${players.length} joueurs · ${money(totalDebt)} créances`}>
@@ -94,6 +103,16 @@ export default function Reports() {
           <Section title={t('nav.expenses')} icon={<Receipt className="h-4 w-4" />} stat={`${expenses.length} dépenses · ${money(totalExp)}`}>
             <Table cols={['Date', 'Nom', 'Catégorie', 'Montant']}
               rows={expenses.map((e) => [fmtDate(e.date), e.name, L.ecName(e.categoryId), money(e.amount)])} />
+          </Section>
+
+          <Section title="Dépenses matchs" icon={<Flag className="h-4 w-4" />} stat={`${matchesInR.length} matchs · ${money(matchExpTotal)}`}>
+            <Table cols={['Date', 'Match', 'Dépense', 'Montant']}
+              rows={matchExpRows.map((e) => [fmtDate(e.match.matchDate), `vs ${e.match.opponent || '—'} (${L.catName(e.match.categoryId)})`, e.name, money(e.amount)])} />
+          </Section>
+
+          <Section title="Assurances" icon={<Shield className="h-4 w-4" />} stat={`${insurances.length} assurances · ${money(insTotal)}`}>
+            <Table cols={['Date', 'Joueur', 'Type', 'Fin', 'Montant']}
+              rows={insurances.map((i) => [fmtDate(i.startDate), L.playerName(i.player), data.insuranceTypes.find((it) => it.id === i.typeId)?.name || '—', fmtDate(i.endDate), money(i.price)])} />
           </Section>
 
           <Section title={t('nav.caisse')} icon={<Wallet className="h-4 w-4" />} stat={`Solde ${money(L.cashBalance)} · ${txs.length} transactions`}>

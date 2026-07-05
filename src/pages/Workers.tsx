@@ -23,11 +23,11 @@ const emptyWorker = {
   accountActive: false, email: '', username: '', password: '', startDate: today(),
 };
 
-// The "workers" NAV entry itself is never assignable — worker management is
-// always admin-only (see HARD_ADMIN_ONLY_PAGES in lib/permissions.ts and the
-// workers RLS policies in supabase/schema.sql), so offering it here would be
+// The "workers" and "doctors" NAV entries are never assignable — their
+// management is always admin-only (see HARD_ADMIN_ONLY_PAGES in
+// lib/permissions.ts and the RLS policies), so offering them here would be
 // misleading (the toggle would have no real effect on data access).
-const ASSIGNABLE_NAV = NAV.filter((n) => n.key !== 'workers');
+const ASSIGNABLE_NAV = NAV.filter((n) => n.key !== 'workers' && n.key !== 'doctors');
 
 export default function Workers() {
   const { t } = useTranslation();

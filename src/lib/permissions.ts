@@ -4,9 +4,10 @@ import type { Worker } from './types';
 
 // Worker/HR data (accounts, salaries, permissions themselves) is a hard
 // admin-only boundary — this mirrors the RLS policies in supabase/schema.sql
-// (workers_read/workers_write are admin-or-self only), so a worker can never
-// see or manage the "Employés" screen even if the flag were mistakenly set.
-const HARD_ADMIN_ONLY_PAGES = new Set(['workers']);
+// (workers_read/workers_write and doctors_read/doctors_write are admin-or-self
+// only), so a worker can never see or manage the "Employés" / "Médecins"
+// screens even if the flag were mistakenly set.
+const HARD_ADMIN_ONLY_PAGES = new Set(['workers', 'doctors']);
 
 export interface Permissions {
   isAdmin: boolean;

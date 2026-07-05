@@ -38,6 +38,8 @@ export default function Caisse() {
     const list: Entry[] = [];
     data.players.forEach((p) => p.payments.forEach((pay) => list.push({ id: pay.id, date: pay.date, label: `${L.playerName(p)} · ${pay.note}`, amount: pay.amount, kind: 'income' })));
     data.expenses.forEach((e) => list.push({ id: e.id, date: e.date, label: `${e.name} · ${L.ecName(e.categoryId)}`, amount: e.amount, kind: 'out' }));
+    // Match expenses are a separate cost stream (see Matches page) that also rolls up here.
+    data.matches.forEach((m) => m.expenses.forEach((e) => list.push({ id: e.id, date: m.matchDate, label: `Dépenses matchs · vs ${m.opponent || '—'} · ${e.name}`, amount: e.amount, kind: 'out' })));
     data.transactions.forEach((tx) => list.push({ id: tx.id, date: tx.date, label: tx.description, amount: tx.amount, kind: tx.type }));
     return list.filter((e) => inRange(e.date)).sort((a, b) => b.date.localeCompare(a.date));
   }, [data, period, L]);

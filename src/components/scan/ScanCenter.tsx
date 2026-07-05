@@ -11,11 +11,13 @@ import {
 import Modal from '../ui/Modal';
 import { Avatar, Badge } from '../ui/Display';
 import { useData } from '../../context/DataContext';
+import { useToast } from '../../context/ToastContext';
 import { useLookups } from '../../lib/selectors';
 import { usePermissions } from '../../lib/permissions';
-import { fmtDate, money } from '../../lib/utils';
+import { fmtDate, money, today, uid } from '../../lib/utils';
 import { resolvePlayerByCode, subStatus, type SubStatus } from '../../lib/scan';
-import type { Player } from '../../lib/types';
+import { attendanceOn, isScheduledOn, notifyAttendanceEmail } from '../../lib/attendance';
+import type { AttendanceRecord, Player } from '../../lib/types';
 import type { IScannerControls } from '@zxing/browser';
 
 // ======================= Context / provider =======================
@@ -293,10 +295,13 @@ function MiniStat({ label, value, danger }: { label: string; value: string; dang
 
 function ScanModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useTranslation();
-  const { data } = useData();
+  const { data, updateItem } = useData();
+  const { toast } = useToast();
   const [code, setCode] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
   const [manualValue, setManualValue] = useState('');
+  // Guards against double-recording while the optimistic update settles.
+  const recordedRef = useRef<Set<string>>(new Set());
 
   // reset whenever it opens
   useEffect(() => {
@@ -307,6 +312,31 @@ function ScanModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     () => (code ? resolvePlayerByCode(code, data.players) : undefined),
     [code, data.players],
   );
+
+  // A successful scan on a scheduled day records the player present (once per
+  // player per day — see attendance_records' unique constraint).
+  useEffect(() => {
+    if (!open || !player) return;
+    const timing = player.assignedSubscription
+      ? data.timings.find((tm) => tm.id === player.assignedSubscription!.timingId)
+      : undefined;
+    const date = today();
+    if (!timing || !isScheduledOn(player, timing, date)) return;
+    if (attendanceOn(player, timing.id, date)) return;
+    const key = `${player.id}:${date}`;
+    if (recordedRef.current.has(key)) return;
+    recordedRef.current.add(key);
+
+    const rec: AttendanceRecord = { id: uid('att'), timingId: timing.id, date, status: 'present', scannedAt: new Date().toISOString() };
+    updateItem('players', player.id, { attendanceRecords: [rec, ...player.attendanceRecords] });
+    toast('Présence enregistrée ✓', 'success');
+    const parent = player.parentId ? data.parents.find((pa) => pa.id === player.parentId) : undefined;
+    // Best-effort parent notification — never blocks the scan flow.
+    notifyAttendanceEmail(data.club, player, parent, rec, timing.name).then((sent) => {
+      if (sent) toast('E-mail de présence envoyé au parent', 'info');
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, player]);
 
   const reset = () => { setCode(null); setManual(false); setManualValue(''); };
   const submitManual = () => { if (manualValue.trim()) setCode(manualValue.trim()); };

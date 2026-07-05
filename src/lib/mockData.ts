@@ -1,7 +1,7 @@
 import type {
   Category, Group, Sport, Stadium, Trainer, Timing, Subscription, Player, Parent,
   Worker, Role, Expense, ExpenseCategory, CaisseTransaction, Activity, ClubContact,
-  ClubInfo,
+  ClubInfo, InsuranceType, Match, Doctor,
 } from './types';
 
 // ============ Shape of the in-memory dataset, backed by Supabase ============
@@ -14,12 +14,15 @@ export interface AppData {
   stadiums: Stadium[];
   roles: Role[];
   expenseCategories: ExpenseCategory[];
+  insuranceTypes: InsuranceType[];
   trainers: Trainer[];
   timings: Timing[];
   subscriptions: Subscription[];
   players: Player[];
   parents: Parent[];
   workers: Worker[];
+  doctors: Doctor[];
+  matches: Match[];
   expenses: Expense[];
   transactions: CaisseTransaction[];
   activities: Activity[];

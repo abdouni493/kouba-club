@@ -7,6 +7,7 @@ import {
 import { LineChart as LineIcon, Sparkles, Users, CircleDollarSign, Ticket, TrendingUp } from 'lucide-react';
 import { PageHeader, StatCard, EmptyState } from '../components/ui/Display';
 import { ChartCard, CurveChart, CHART, tooltipStyle } from '../components/ui/Charts';
+import EvaluationSection from '../components/analytics/EvaluationSection';
 import { Input, Select } from '../components/ui/Fields';
 import { useData } from '../context/DataContext';
 import { useLookups } from '../lib/selectors';
@@ -131,6 +132,11 @@ export default function Analyse() {
           </ChartCard>
         </div>
       )}
+
+      {/* Player development (evaluations) — independent of the finance analysis above */}
+      <div className="mt-8">
+        <EvaluationSection />
+      </div>
     </div>
   );
 }

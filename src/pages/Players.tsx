@@ -7,10 +7,11 @@ import {
   Users, Plus, Eye, Pencil, Trash2, Ticket, CreditCard, CircleDollarSign, Calendar,
   Phone, Mail, MapPin, User, Bell, Check, Upload, Printer, Trophy, X, ScanLine, AlertTriangle,
   HeartPulse, FileText, UserPlus, ImagePlus, Camera, Loader2,
+  ClipboardList, ClipboardCheck, Shield, Clock,
 } from 'lucide-react';
 import { PageHeader, Badge, EmptyState, useConfirm, SearchInput, Avatar, Tabs } from '../components/ui/Display';
 import Modal from '../components/ui/Modal';
-import { Input, Select, Textarea, Segmented } from '../components/ui/Fields';
+import { Input, Select, Textarea, Segmented, CreatableSelect } from '../components/ui/Fields';
 import { useData } from '../context/DataContext';
 import { useToast } from '../context/ToastContext';
 import { useScan } from '../components/scan/ScanCenter';
@@ -19,8 +20,9 @@ import { usePermissions } from '../lib/permissions';
 import { uploadImage } from '../lib/storage';
 import { money, uid, today, fmtDate, addDays, daysUntil, cx } from '../lib/utils';
 import { sendClubEmail } from '../lib/email';
-import { buildPlayerSubscriptionPdf } from '../lib/pdf';
-import type { Player, AssignedSubscription, Payment, MedicalRecord } from '../lib/types';
+import { buildPlayerSubscriptionPdf, buildSubscriptionInvoicePdf } from '../lib/pdf';
+import { insuranceStatus } from '../lib/insurance';
+import type { Player, AssignedSubscription, Payment, MedicalRecord, PlayerEvaluation, PlayerInsurance } from '../lib/types';
 
 const emptyPlayer = {
   firstName: '', lastName: '', birthDate: '', birthPlace: '', address: '', phone: '', email: '', parentId: '',
@@ -65,12 +67,13 @@ export default function Players() {
   const [cardPlayer, setCardPlayer] = useState<Player | null>(null);
   const [alertOpen, setAlertOpen] = useState(false);
   const [emailAsk, setEmailAsk] = useState<Player | null>(null);
+  const [evalP, setEvalP] = useState<Player | null>(null);
 
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [pquick, setPquick] = useState({ open: false, firstName: '', lastName: '', phone: '', email: '', address: '' });
 
-  const [f, setF] = useState({ search: '', category: '', group: '', sub: '', pay: '', state: '' });
+  const [f, setF] = useState({ search: '', category: '', group: '', sub: '', pay: '', state: '', ins: '' });
 
   const onPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -116,6 +119,7 @@ export default function Players() {
       if (f.state === 'expired' && !(p.assignedSubscription && d < 0)) return false;
       if (f.state === 'soon' && !(p.assignedSubscription && d >= 0 && d <= 7)) return false;
     }
+    if (f.ins && insuranceStatus(p).status !== f.ins) return false;
     return true;
   }), [data.players, f, L]);
 
@@ -159,7 +163,7 @@ export default function Players() {
       const medicalRecords: MedicalRecord[] = [
         { id: uid('med'), status: form.medStatus, description: form.medDescription, date: form.medDate || today() },
       ];
-      add('players', { id, ...base, createdAt: today(), subscriptionCostPaid: false, payments: [], medicalRecords });
+      add('players', { id, ...base, createdAt: today(), subscriptionCostPaid: false, payments: [], medicalRecords, attendanceRecords: [], evaluations: [], insurances: [] });
       relinkParent(id, undefined, form.parentId || undefined);
       toast('Joueur créé — inscription non payée', 'success');
     }
@@ -180,12 +184,16 @@ export default function Players() {
 
       <div className="card p-4 mb-5 space-y-3">
         <SearchInput value={f.search} onChange={(v) => setF({ ...f, search: v })} placeholder={t('players.searchPh')} />
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
           <Select value={f.category} onChange={(v) => setF({ ...f, category: v })} placeholder={t('players.filterCategory')} options={data.categories.map((c) => ({ value: c.id, label: c.name }))} />
           <Select value={f.group} onChange={(v) => setF({ ...f, group: v })} placeholder={t('players.filterGroup')} options={data.groups.map((c) => ({ value: c.id, label: c.name }))} />
           <Select value={f.sub} onChange={(v) => setF({ ...f, sub: v })} placeholder={t('players.filterSub')} options={data.subscriptions.map((c) => ({ value: c.id, label: c.name }))} />
           <Select value={f.pay} onChange={(v) => setF({ ...f, pay: v })} placeholder={t('players.filterPay')} options={[{ value: 'payed', label: t('common.paid') }, { value: 'debt', label: t('players.debt') }]} />
           <Select value={f.state} onChange={(v) => setF({ ...f, state: v })} placeholder={t('common.status')} options={[{ value: 'active', label: t('players.activeSubs') }, { value: 'expired', label: t('players.expiredSubs') }, { value: 'soon', label: t('players.soonExpiring') }]} />
+          <Select value={f.ins} onChange={(v) => setF({ ...f, ins: v })} placeholder="Assurance" options={[
+            { value: 'none', label: 'Sans assurance' }, { value: 'valid', label: 'Assurance valide' },
+            { value: 'soon', label: 'Expire bientôt' }, { value: 'expired', label: 'Assurance expirée' },
+          ]} />
         </div>
       </div>
 
@@ -309,6 +317,7 @@ export default function Players() {
       {payDebt && <PayDebtModal p={current(payDebt)} onClose={() => setPayDebt(null)} />}
       {cardPlayer && <CardPrintModal p={current(cardPlayer)} onClose={() => setCardPlayer(null)} />}
       {emailAsk && <EmailAskModal player={current(emailAsk)} onClose={() => setEmailAsk(null)} />}
+      {evalP && <EvaluationModal p={current(evalP)} onClose={() => setEvalP(null)} />}
 
       <Modal open={alertOpen} onClose={() => setAlertOpen(false)} size="lg" title={t('players.expiryAlert')} subtitle={`${expiredList.length} abonnements expirés`}>
         {expiredList.length === 0 ? <p className="text-sm text-muted">Aucune expiration 🎉</p> : (
@@ -379,6 +388,7 @@ export default function Players() {
         <div className="flex items-center gap-1.5 mt-4 pt-4 border-t border-line/10">
           {canDo('players', 'view') && <button onClick={() => setDetail(p)} className="btn-ghost flex-1 !py-2"><Eye className="h-4 w-4" />{t('common.view')}</button>}
           {canDo('players', 'assign') && <button onClick={() => setAssign(p)} className="btn-icon" title={t('players.assign')}><Ticket className="h-4 w-4" /></button>}
+          {canDo('players', 'evaluate') && <button onClick={() => setEvalP(p)} className="btn-icon" title="Évaluation"><ClipboardList className="h-4 w-4" /></button>}
           {canDo('players', 'card') && <button onClick={() => setCardPlayer(p)} className="btn-icon" title={t('players.card')}><CreditCard className="h-4 w-4" /></button>}
           {a && a.rest > 0 && canDo('players', 'payDebt') && <button onClick={() => setPayDebt(p)} className="btn-icon text-warning" title={t('players.payDebt')}><CircleDollarSign className="h-4 w-4" /></button>}
           {canDo('players', 'edit') && <button onClick={() => openEdit(p)} className="btn-icon" title={t('common.edit')}><Pencil className="h-4 w-4" /></button>}
@@ -406,6 +416,8 @@ export default function Players() {
         <Tabs active={tab} onChange={setTab} tabs={[
           { key: 'info', label: t('players.personalInfo'), icon: <User className="h-4 w-4" /> },
           { key: 'medical', label: 'Médical', icon: <HeartPulse className="h-4 w-4" /> },
+          { key: 'presence', label: 'Présences', icon: <ClipboardCheck className="h-4 w-4" /> },
+          { key: 'evals', label: 'Évaluations', icon: <ClipboardList className="h-4 w-4" /> },
           { key: 'docs', label: 'Documents', icon: <FileText className="h-4 w-4" /> },
           { key: 'sub', label: t('players.subInfo'), icon: <Ticket className="h-4 w-4" /> },
           { key: 'pay', label: t('players.paymentHistory'), icon: <CircleDollarSign className="h-4 w-4" /> },
@@ -480,6 +492,51 @@ export default function Players() {
               )}
             </div>
           )}
+          {tab === 'presence' && (
+            p.attendanceRecords.length === 0 ? (
+              <EmptyState title="Aucun historique de présence" hint="Les présences sont enregistrées au scan de la carte ou depuis la page Présences." icon={<ClipboardCheck className="h-7 w-7" />} />
+            ) : (
+              <div className="space-y-2">
+                {[...p.attendanceRecords].sort((x, y) => y.date.localeCompare(x.date)).map((a) => (
+                  <div key={a.id} className="flex items-center gap-3 rounded-xl bg-surface-2 p-3">
+                    <span className={cx('grid h-8 w-8 shrink-0 place-items-center rounded-full', a.status === 'present' ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger')}>
+                      {a.status === 'present' ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-fg truncate">{L.timingName(a.timingId)}</p>
+                      <p className="text-xs text-muted flex items-center gap-1.5"><Calendar className="h-3 w-3" />{fmtDate(a.date)}{a.scannedAt && <span className="flex items-center gap-1"><ScanLine className="h-3 w-3" />scan</span>}</p>
+                    </div>
+                    <Badge tone={a.status === 'present' ? 'success' : 'danger'}>{a.status === 'present' ? 'Présent' : 'Absent'}</Badge>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+          {tab === 'evals' && (
+            p.evaluations.length === 0 ? (
+              <EmptyState title="Aucune évaluation" hint="Utilisez le bouton « Évaluation » sur la carte du joueur." icon={<ClipboardList className="h-7 w-7" />} />
+            ) : (
+              <div className="space-y-3">
+                {[...p.evaluations].sort((x, y) => y.date.localeCompare(x.date)).map((ev) => (
+                  <div key={ev.id} className="rounded-xl bg-surface-2 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-sm font-semibold text-fg flex items-center gap-2"><Clock className="h-4 w-4 text-accent" />{fmtDate(ev.date)}</p>
+                      <Badge tone="accent">{Math.round((ev.speed + ev.ballControl + ev.dribbling + ev.passing + ev.fitness + ev.discipline) / 6)}/100</Badge>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      {([['Vitesse', ev.speed], ['Contrôle', ev.ballControl], ['Dribble', ev.dribbling], ['Passes', ev.passing], ['Physique', ev.fitness], ['Discipline', ev.discipline]] as const).map(([label, v]) => (
+                        <div key={label} className="rounded-lg bg-surface-3 p-2">
+                          <div className="flex items-center justify-between text-xs mb-1"><span className="text-muted">{label}</span><span className="font-bold text-fg">{v}</span></div>
+                          <div className="h-1.5 rounded-full bg-line/20 overflow-hidden"><div className="h-full rounded-full bg-accent-grad" style={{ width: `${Math.min(100, Math.max(0, v))}%` }} /></div>
+                        </div>
+                      ))}
+                    </div>
+                    {ev.description && <p className="text-sm text-muted mt-3">{ev.description}</p>}
+                  </div>
+                ))}
+              </div>
+            )
+          )}
           {tab === 'docs' && (
             p.documentUrls.length === 0 ? (
               <EmptyState title="Aucun document" hint="Ajoutez des documents en modifiant le joueur." icon={<FileText className="h-7 w-7" />} />
@@ -535,6 +592,19 @@ export default function Players() {
     const [subId, setSubId] = useState(p.assignedSubscription?.subscriptionId || '');
     const [startDate, setStartDate] = useState(today());
     const [searchQuery, setSearchQuery] = useState('');
+    const ins = insuranceStatus(p);
+    const [insOpen, setInsOpen] = useState(false);
+    const [insForm, setInsForm] = useState({ typeId: '', price: 0, startDate: today(), endDate: addDays(today(), 365), description: '' });
+
+    const saveInsurance = () => {
+      if (!insForm.typeId) { toast('Sélectionnez un type d\'assurance', 'error'); return; }
+      if (insForm.endDate < insForm.startDate) { toast('La date de fin doit suivre la date de début', 'error'); return; }
+      const entry: PlayerInsurance = { id: uid('ins'), ...insForm };
+      updateItem('players', p.id, { insurances: [entry, ...p.insurances] });
+      setInsOpen(false);
+      setInsForm({ typeId: '', price: 0, startDate: today(), endDate: addDays(today(), 365), description: '' });
+      toast('Assurance enregistrée', 'success');
+    };
     const sub = data.subscriptions.find((s) => s.id === subId);
     const regFeeAmount = data.club.regFeeAmount || 0;
     const alreadyPaidReg = p.subscriptionCostPaid;
@@ -756,6 +826,128 @@ export default function Players() {
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* ---- Assurance ---- */}
+          <div className="pt-5 border-t border-line/10 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-xs font-bold uppercase tracking-widest text-accent-soft flex items-center gap-2">
+                <Shield className="h-4 w-4" /> Assurance
+              </h4>
+              <button type="button" onClick={() => setInsOpen((o) => !o)}
+                className={cx('btn-ghost !py-1.5 !px-3 text-xs', insOpen && 'border-accent/50 text-accent')}>
+                <Plus className="h-3.5 w-3.5" />Nouvelle assurance
+              </button>
+            </div>
+
+            {ins.status === 'valid' && ins.current ? (
+              <div className="rounded-2xl bg-success/10 border border-success/20 px-4 py-3 flex items-center gap-3">
+                <Check className="h-5 w-5 text-success shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-fg">Assurance valide — {data.insuranceTypes.find((it) => it.id === ins.current!.typeId)?.name || 'Assurance'}</p>
+                  <p className="text-xs text-muted">Jusqu'au {fmtDate(ins.current.endDate)} ({ins.days} jours restants) · {money(ins.current.price)}</p>
+                </div>
+              </div>
+            ) : ins.status === 'soon' && ins.current ? (
+              <div className="rounded-2xl bg-warning/10 border border-warning/20 px-4 py-3 flex items-center gap-3">
+                <AlertTriangle className="h-5 w-5 text-warning shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-fg">Assurance expire bientôt</p>
+                  <p className="text-xs text-muted">Fin le {fmtDate(ins.current.endDate)} — dans {ins.days} jours. Pensez à la renouveler.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl bg-danger/10 border border-danger/20 px-4 py-3 flex items-center gap-3">
+                <AlertTriangle className="h-5 w-5 text-danger shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-fg">{ins.status === 'expired' ? 'Assurance expirée' : 'Aucune assurance'}</p>
+                  <p className="text-xs text-muted">
+                    {ins.status === 'expired' && ins.current
+                      ? `Expirée depuis le ${fmtDate(ins.current.endDate)} — ajoutez une nouvelle assurance.`
+                      : 'Ce joueur n\'a aucune assurance enregistrée.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <AnimatePresence>
+              {insOpen && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                  <div className="rounded-2xl bg-surface-2 border border-line/10 p-4 space-y-3">
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <CreatableSelect label="Type d'assurance" value={insForm.typeId} onChange={(v) => setInsForm({ ...insForm, typeId: v })}
+                        options={data.insuranceTypes.map((it) => ({ value: it.id, label: it.name }))}
+                        onCreate={(name) => { const id = uid('instype'); add('insuranceTypes', { id, name }); return id; }}
+                        createLabel="Nouveau type" placeholder="Sélectionner…" />
+                      <Input label={t('common.price')} type="number" value={insForm.price || ''} onChange={(e) => setInsForm({ ...insForm, price: +e.target.value })} />
+                      <Input label={t('common.startDate')} type="date" value={insForm.startDate} onChange={(e) => setInsForm({ ...insForm, startDate: e.target.value })} />
+                      <Input label="Date de fin" type="date" value={insForm.endDate} onChange={(e) => setInsForm({ ...insForm, endDate: e.target.value })} />
+                    </div>
+                    <Textarea label={`${t('common.description')} (optionnel)`} value={insForm.description} onChange={(e) => setInsForm({ ...insForm, description: e.target.value })} />
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => setInsOpen(false)} className="btn-ghost !py-1.5">{t('common.cancel')}</button>
+                      <button type="button" onClick={saveInsurance} className="btn-primary !py-1.5"><Check className="h-4 w-4" />Enregistrer l'assurance</button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {p.insurances.length > 0 && (
+              <div className="space-y-1.5">
+                {[...p.insurances].sort((a, b) => b.endDate.localeCompare(a.endDate)).map((i2) => (
+                  <div key={i2.id} className="flex items-center justify-between rounded-xl bg-surface-2 px-3 py-2 text-xs">
+                    <span className="text-fg font-medium truncate">{data.insuranceTypes.find((it) => it.id === i2.typeId)?.name || 'Assurance'}</span>
+                    <span className="text-muted">{fmtDate(i2.startDate)} → {fmtDate(i2.endDate)}</span>
+                    <span className="font-semibold text-fg">{money(i2.price)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  function EvaluationModal({ p, onClose }: { p: Player; onClose: () => void }) {
+    const [form, setForm] = useState({ date: today(), speed: 50, ballControl: 50, dribbling: 50, passing: 50, fitness: 50, discipline: 50, description: '' });
+    const metrics = [
+      ['speed', 'Vitesse'], ['ballControl', 'Contrôle de balle'], ['dribbling', 'Dribble'],
+      ['passing', 'Passes'], ['fitness', 'Condition physique'], ['discipline', 'Discipline'],
+    ] as const;
+    const save = () => {
+      const ev: PlayerEvaluation = { id: uid('ev'), ...form };
+      updateItem('players', p.id, { evaluations: [ev, ...p.evaluations] });
+      toast('Évaluation enregistrée', 'success');
+      onClose();
+    };
+    return (
+      <Modal open onClose={onClose} size="lg" title="Nouvelle évaluation" subtitle={L.playerName(p)}
+        footer={<><button onClick={onClose} className="btn-ghost">{t('common.cancel')}</button><button onClick={save} className="btn-primary"><Check className="h-4 w-4" />{t('common.save')}</button></>}>
+        <div className="space-y-5">
+          <div className="grid sm:grid-cols-2 gap-4">
+            {metrics.map(([key, label]) => (
+              <div key={key} className="rounded-xl bg-surface-2 p-3.5">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-semibold text-fg">{label}</span>
+                  <span className="font-display font-extrabold text-accent">{form[key]}</span>
+                </div>
+                <input type="range" min={0} max={100} step={1} value={form[key]}
+                  onChange={(e) => setForm({ ...form, [key]: +e.target.value })}
+                  className="w-full accent-[rgb(var(--accent))]" />
+              </div>
+            ))}
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Input label={t('common.date')} type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+            <div className="rounded-xl bg-accent/10 border border-accent/20 p-3 flex items-center justify-between">
+              <span className="text-sm font-semibold text-fg">Moyenne</span>
+              <span className="font-display text-xl font-extrabold text-accent">
+                {Math.round((form.speed + form.ballControl + form.dribbling + form.passing + form.fitness + form.discipline) / 6)}/100
+              </span>
+            </div>
+          </div>
+          <Textarea label={`${t('common.description')} (optionnel)`} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Remarques, axes de progression…" />
         </div>
       </Modal>
     );
@@ -858,6 +1050,19 @@ export default function Players() {
   function EmailAskModal({ player, onClose }: { player: Player; onClose: () => void }) {
     const parent = player.parentId ? L.par[player.parentId] : undefined;
     const [sending, setSending] = useState(false);
+    const [printing, setPrinting] = useState(false);
+    const printInvoice = async () => {
+      setPrinting(true);
+      try {
+        const inv = await buildSubscriptionInvoicePdf(data.club, player, parent, L);
+        // Print-ready view: the browser's PDF viewer opens in a new tab with its print action.
+        window.open(inv.blobUrl, '_blank');
+      } catch (err) {
+        toast(err instanceof Error ? err.message : 'Erreur de génération de la facture', 'error');
+      } finally {
+        setPrinting(false);
+      }
+    };
     const send = async () => {
       const recipients = [
         player.email ? { email: player.email, name: `${player.firstName} ${player.lastName}` } : null,
@@ -879,20 +1084,33 @@ export default function Players() {
       }
     };
     return (
-      <Modal open onClose={onClose} size="md" title={t('players.sendMail')} subtitle="Confirmation d'abonnement">
-        <div className="text-center py-2">
-          <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-accent/15 text-accent mb-4"><Mail className="h-7 w-7" /></div>
-          <p className="text-fg font-semibold">Envoyer la confirmation par e-mail ?</p>
-          <p className="text-sm text-muted mt-2">Destinataires :</p>
-          <div className="mt-2 space-y-1 text-sm">
-            {player.email && <p className="text-fg">{player.email} <span className="text-muted">(joueur)</span></p>}
-            {parent?.email && <p className="text-fg">{parent.email} <span className="text-muted">(parent)</span></p>}
-            {!player.email && !parent?.email && <p className="text-muted">Aucune adresse e-mail disponible</p>}
+      <Modal open onClose={onClose} size="md" title="Abonnement assigné ✓" subtitle={L.playerName(player)}>
+        <div className="space-y-5 py-1">
+          {/* Invoice printing */}
+          <div className="rounded-2xl bg-surface-2 border border-line/10 p-4 text-center">
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-accent/15 text-accent mb-3"><Printer className="h-6 w-6" /></div>
+            <p className="text-fg font-semibold">Souhaitez-vous imprimer la facture ?</p>
+            <p className="text-xs text-muted mt-1">Facture officielle avec numéro, code-barres et cachet du club.</p>
+            <button onClick={printInvoice} className="btn-primary mt-4 w-full" disabled={printing}>
+              <Printer className="h-4 w-4" />{printing ? 'Génération…' : 'Imprimer la facture'}
+            </button>
           </div>
-          <div className="flex gap-3 mt-6">
-            <button onClick={onClose} className="btn-ghost flex-1"><X className="h-4 w-4" />{t('common.no')}</button>
-            <button onClick={send} className="btn-primary flex-1" disabled={sending || (!player.email && !parent?.email)}><Check className="h-4 w-4" />{sending ? '…' : t('common.send')}</button>
+
+          {/* Email confirmation */}
+          <div className="rounded-2xl bg-surface-2 border border-line/10 p-4 text-center">
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-accent/15 text-accent mb-3"><Mail className="h-6 w-6" /></div>
+            <p className="text-fg font-semibold">Envoyer la confirmation par e-mail ?</p>
+            <div className="mt-2 space-y-1 text-sm">
+              {player.email && <p className="text-fg">{player.email} <span className="text-muted">(joueur)</span></p>}
+              {parent?.email && <p className="text-fg">{parent.email} <span className="text-muted">(parent)</span></p>}
+              {!player.email && !parent?.email && <p className="text-muted">Aucune adresse e-mail disponible</p>}
+            </div>
+            <button onClick={send} className="btn-primary mt-4 w-full" disabled={sending || (!player.email && !parent?.email)}>
+              <Check className="h-4 w-4" />{sending ? '…' : t('common.send')}
+            </button>
           </div>
+
+          <button onClick={onClose} className="btn-ghost w-full"><X className="h-4 w-4" />{t('common.close')}</button>
         </div>
       </Modal>
     );
