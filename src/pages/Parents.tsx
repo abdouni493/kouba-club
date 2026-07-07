@@ -243,11 +243,11 @@ export default function Parents() {
             text = `Bonjour, ${message}`;
           }
           const phones = [...new Set(selectedSmsTargets.map((tgt) => tgt.phone))];
-          let ok = 0, fail = 0;
+          let ok = 0, fail = 0, lastErr = '';
           for (const phone of phones) {
-            try { await sendClubSms(phone, text); ok++; } catch { fail++; }
+            try { await sendClubSms(phone, text); ok++; } catch (e) { fail++; lastErr = e instanceof Error ? e.message : String(e); }
           }
-          toast(fail === 0 ? `${ok} SMS envoyé(s)` : `${ok} envoyé(s), ${fail} échoué(s)`, fail === 0 ? 'success' : 'error');
+          toast(fail === 0 ? `${ok} SMS envoyé(s)` : `${ok} envoyé(s), ${fail} échoué(s)${lastErr ? ` — ${lastErr}` : ''}`, fail === 0 ? 'success' : 'error');
         }
         onClose();
       } catch (err) {

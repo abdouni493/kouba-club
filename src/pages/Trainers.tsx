@@ -324,7 +324,7 @@ export default function Trainers() {
     const toggle = (id: string) => setSel((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
     const send = async () => {
       setSending(true);
-      let ok = 0, fail = 0;
+      let ok = 0, fail = 0, lastErr = '';
       for (const id of sel) {
         const p = list.find((x) => x.id === id);
         if (!p?.assignedSubscription) continue;
@@ -355,11 +355,11 @@ export default function Trainers() {
             const text = `L'abonnement de ${L.playerName(p)} (${status}, échéance ${fmtDate(p.assignedSubscription.expiryDate)}) nécessite votre attention. Fiche complète : ${link}`;
             for (const phone of phones) await sendClubSms(phone, text);
             ok++;
-          } catch { fail++; }
+          } catch (e) { fail++; lastErr = e instanceof Error ? e.message : String(e); }
         }
       }
       setSending(false);
-      toast(fail === 0 ? `${ok} ${channel === 'email' ? 'e-mail(s)' : 'SMS'} envoyé(s)` : `${ok} envoyé(s), ${fail} échoué(s)`, fail === 0 ? 'success' : 'error');
+      toast(fail === 0 ? `${ok} ${channel === 'email' ? 'e-mail(s)' : 'SMS'} envoyé(s)` : `${ok} envoyé(s), ${fail} échoué(s)${lastErr ? ` — ${lastErr}` : ''}`, fail === 0 ? 'success' : 'error');
       onClose();
     };
     return (

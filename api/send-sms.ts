@@ -23,6 +23,33 @@ interface VercelLikeResponse {
   json(body: unknown): void;
 }
 
+/**
+ * Returns the JSON payload as an object.
+ *
+ * Vercel is *supposed* to auto-parse `application/json` into `req.body`, but that
+ * doesn't happen reliably (it can arrive undefined or as a raw string), which made
+ * every SMS fail with a 400 "Numéro de téléphone invalide" because `to` was missing.
+ * We defensively handle all three shapes: parsed object, JSON string, or an
+ * unconsumed request stream we read ourselves.
+ */
+async function readJsonBody(req: VercelLikeRequest): Promise<Record<string, unknown>> {
+  const existing = req.body;
+  if (existing && typeof existing === 'object') return existing as Record<string, unknown>;
+  if (typeof existing === 'string' && existing.trim()) {
+    try { return JSON.parse(existing) as Record<string, unknown>; } catch { return {}; }
+  }
+  try {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req as unknown as AsyncIterable<Buffer | string>) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    }
+    const raw = Buffer.concat(chunks).toString('utf8').trim();
+    return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 export default async function handler(req: VercelLikeRequest, res: VercelLikeResponse) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Méthode non autorisée' });
@@ -52,12 +79,14 @@ export default async function handler(req: VercelLikeRequest, res: VercelLikeRes
     return;
   }
 
-  const { to, body } = (req.body || {}) as { to?: string; body?: string };
+  const parsed = await readJsonBody(req);
+  const to = typeof parsed.to === 'string' ? parsed.to.trim() : '';
+  const body = typeof parsed.body === 'string' ? parsed.body : '';
   if (!to || !E164.test(to)) {
     res.status(400).json({ error: 'Numéro de téléphone invalide (format international requis)' });
     return;
   }
-  if (!body || !body.trim()) {
+  if (!body.trim()) {
     res.status(400).json({ error: 'Message vide' });
     return;
   }
