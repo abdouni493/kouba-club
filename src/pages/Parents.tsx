@@ -201,16 +201,28 @@ export default function Parents() {
     const [lastOnly, setLastOnly] = useState(false);
     const [message, setMessage] = useState('');
     const [sending, setSending] = useState(false);
-    const phone = normalizePhoneE164(parent.phone);
+    const [excludedSms, setExcludedSms] = useState<Set<string>>(new Set());
+    const parentPhone = normalizePhoneE164(parent.phone);
+
+    const rows = parent.playerIds
+      .map((id) => L.pl[id])
+      .filter((pl): pl is NonNullable<typeof pl> => !!pl?.assignedSubscription)
+      .slice(0, lastOnly ? 1 : undefined);
+    const candidatePlayers = mode === 'report' ? rows : parent.playerIds.map((id) => L.pl[id]).filter((pl): pl is NonNullable<typeof pl> => !!pl);
+    const smsTargets = [
+      ...(parentPhone ? [{ id: 'parent', label: `${parent.firstName} ${parent.lastName}`, sub: 'parent', phone: parentPhone }] : []),
+      ...candidatePlayers
+        .map((pl) => { const ph = normalizePhoneE164(pl.phone); return ph ? { id: pl.id, label: `${pl.firstName} ${pl.lastName}`, sub: 'joueur', phone: ph } : null; })
+        .filter((x): x is { id: string; label: string; sub: string; phone: string } => !!x),
+    ];
+    const selectedSmsTargets = smsTargets.filter((tgt) => !excludedSms.has(tgt.id));
+    const toggleSmsTarget = (id: string) => setExcludedSms((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
     const send = async () => {
       if (channel === 'email' && !parent.email) { toast('Ce parent n\'a pas d\'e-mail', 'error'); return; }
-      if (channel === 'sms' && !phone) { toast('Ce parent n\'a pas de numéro de téléphone valide', 'error'); return; }
+      if (channel === 'sms' && selectedSmsTargets.length === 0) { toast('Sélectionnez au moins un destinataire', 'error'); return; }
       setSending(true);
       try {
-        const rows = parent.playerIds
-          .map((id) => L.pl[id])
-          .filter((pl): pl is NonNullable<typeof pl> => !!pl?.assignedSubscription)
-          .slice(0, lastOnly ? 1 : undefined);
         if (channel === 'email') {
           const html = mode === 'report'
             ? `<p>Bonjour ${parent.firstName},</p><p>Voici le rapport d'abonnement :</p><ul>${rows.map((pl) => `<li>${pl.firstName} — ${L.timingName(pl.assignedSubscription!.timingId)} — ${money(pl.assignedSubscription!.price)} (exp. ${fmtDate(pl.assignedSubscription!.expiryDate)})</li>`).join('')}</ul><p>Vous trouverez la ou les fiches complètes en pièce jointe.</p>`
@@ -225,13 +237,17 @@ export default function Parents() {
           if (mode === 'report') {
             const pdfs = await Promise.all(rows.map((pl) => buildPlayerSubscriptionPdf(data.club, pl, parent, L)));
             const links = await Promise.all(pdfs.map((pdf) => uploadPdfForSms(pdf.base64)));
-            text = `Bonjour ${parent.firstName}, voici le rapport d'abonnement :\n` +
+            text = `Bonjour, voici le rapport d'abonnement :\n` +
               rows.map((pl, i) => `${pl.firstName} — ${L.timingName(pl.assignedSubscription!.timingId)} — ${money(pl.assignedSubscription!.price)} : ${links[i]}`).join('\n');
           } else {
-            text = `Bonjour ${parent.firstName}, ${message}`;
+            text = `Bonjour, ${message}`;
           }
-          await sendClubSms(phone!, text);
-          toast(`${mode === 'report' ? 'Rapport' : 'Message'} envoyé par SMS à ${phone}`, 'success');
+          const phones = [...new Set(selectedSmsTargets.map((tgt) => tgt.phone))];
+          let ok = 0, fail = 0;
+          for (const phone of phones) {
+            try { await sendClubSms(phone, text); ok++; } catch { fail++; }
+          }
+          toast(fail === 0 ? `${ok} SMS envoyé(s)` : `${ok} envoyé(s), ${fail} échoué(s)`, fail === 0 ? 'success' : 'error');
         }
         onClose();
       } catch (err) {
@@ -242,7 +258,7 @@ export default function Parents() {
     };
     return (
       <Modal open onClose={onClose} size="md" title={t('parents.sendReport')} subtitle={`${parent.firstName} ${parent.lastName}`}
-        footer={<><button onClick={onClose} className="btn-ghost">{t('common.cancel')}</button><button onClick={send} className="btn-primary" disabled={sending}>{channel === 'email' ? <Mail className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}{sending ? '…' : t('common.send')}</button></>}>
+        footer={<><button onClick={onClose} className="btn-ghost">{t('common.cancel')}</button><button onClick={send} className="btn-primary" disabled={sending || (channel === 'email' ? !parent.email : selectedSmsTargets.length === 0)}>{channel === 'email' ? <Mail className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}{sending ? '…' : t('common.send')}</button></>}>
         <div className="space-y-4">
           <Segmented value={channel} onChange={setChannel} options={[{ value: 'email', label: 'E-mail' }, { value: 'sms', label: 'SMS' }]} />
           <Segmented value={mode} onChange={setMode} options={[{ value: 'report', label: t('parents.sendReport') }, { value: 'message', label: t('parents.specialMessage') }]} />
@@ -265,7 +281,16 @@ export default function Parents() {
           {channel === 'email' ? (
             <p className="text-xs text-faint">Envoyé depuis {data.club.email || '—'}</p>
           ) : (
-            <p className="text-xs text-faint">{phone ? `Envoyé au ${phone}` : 'Numéro de téléphone invalide ou manquant'}</p>
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted">Destinataires SMS</p>
+              {smsTargets.length === 0 && <p className="text-xs text-faint">Aucun numéro de téléphone valide disponible</p>}
+              {smsTargets.map((tgt) => (
+                <label key={tgt.id} className="flex items-center gap-3 rounded-xl bg-surface-2 p-2.5 cursor-pointer">
+                  <input type="checkbox" checked={!excludedSms.has(tgt.id)} onChange={() => toggleSmsTarget(tgt.id)} className="h-4 w-4 accent-[rgb(var(--accent))]" />
+                  <span className="text-sm text-fg">{tgt.phone} <span className="text-muted">({tgt.label} · {tgt.sub})</span></span>
+                </label>
+              ))}
+            </div>
           )}
         </div>
       </Modal>

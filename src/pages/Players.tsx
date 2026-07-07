@@ -1055,6 +1055,8 @@ export default function Players() {
     const [printing, setPrinting] = useState(false);
     const playerPhone = normalizePhoneE164(player.phone);
     const parentPhone = parent?.phone ? normalizePhoneE164(parent.phone) : null;
+    const [smsToPlayer, setSmsToPlayer] = useState(true);
+    const [smsToParent, setSmsToParent] = useState(true);
     const printInvoice = async () => {
       setPrinting(true);
       try {
@@ -1082,7 +1084,10 @@ export default function Players() {
           await sendClubEmail(data.club, recipients, t('players.sendMail'), html, [{ name: pdf.filename, content: pdf.base64 }]);
           toast('E-mail envoyé', 'success');
         } else {
-          const phones = [...new Set([playerPhone, parentPhone].filter((p): p is string => !!p))];
+          const phones = [...new Set([
+            smsToPlayer ? playerPhone : null,
+            smsToParent ? parentPhone : null,
+          ].filter((p): p is string => !!p))];
           if (phones.length === 0) return;
           const pdf = await buildPlayerSubscriptionPdf(data.club, player, parent, L);
           const link = await uploadPdfForSms(pdf.base64);
@@ -1100,7 +1105,7 @@ export default function Players() {
         setSending(false);
       }
     };
-    const canSend = channel === 'email' ? !!(player.email || parent?.email) : !!(playerPhone || parentPhone);
+    const canSend = channel === 'email' ? !!(player.email || parent?.email) : (smsToPlayer && !!playerPhone) || (smsToParent && !!parentPhone);
     return (
       <Modal open onClose={onClose} size="md" title="Abonnement assigné ✓" subtitle={L.playerName(player)}>
         <div className="space-y-5 py-1">
@@ -1123,7 +1128,7 @@ export default function Players() {
             <div className="mt-3 flex justify-center">
               <Segmented value={channel} onChange={setChannel} options={[{ value: 'email', label: 'E-mail' }, { value: 'sms', label: 'SMS' }]} />
             </div>
-            <div className="mt-3 space-y-1 text-sm">
+            <div className="mt-3 space-y-1.5 text-sm text-left">
               {channel === 'email' ? (
                 <>
                   {player.email && <p className="text-fg">{player.email} <span className="text-muted">(joueur)</span></p>}
@@ -1132,9 +1137,15 @@ export default function Players() {
                 </>
               ) : (
                 <>
-                  {playerPhone && <p className="text-fg">{playerPhone} <span className="text-muted">(joueur)</span></p>}
-                  {parentPhone && <p className="text-fg">{parentPhone} <span className="text-muted">(parent)</span></p>}
-                  {!playerPhone && !parentPhone && <p className="text-muted">Aucun numéro de téléphone valide disponible</p>}
+                  <label className={`flex items-center gap-3 rounded-xl bg-surface p-2.5 ${playerPhone ? 'cursor-pointer' : 'opacity-50'}`}>
+                    <input type="checkbox" checked={smsToPlayer && !!playerPhone} disabled={!playerPhone} onChange={(e) => setSmsToPlayer(e.target.checked)} className="h-4 w-4 accent-[rgb(var(--accent))]" />
+                    <span className="text-fg">{playerPhone || 'Numéro invalide'} <span className="text-muted">(joueur)</span></span>
+                  </label>
+                  <label className={`flex items-center gap-3 rounded-xl bg-surface p-2.5 ${parentPhone ? 'cursor-pointer' : 'opacity-50'}`}>
+                    <input type="checkbox" checked={smsToParent && !!parentPhone} disabled={!parentPhone} onChange={(e) => setSmsToParent(e.target.checked)} className="h-4 w-4 accent-[rgb(var(--accent))]" />
+                    <span className="text-fg">{parentPhone || 'Numéro invalide'} <span className="text-muted">(parent)</span></span>
+                  </label>
+                  {!playerPhone && !parentPhone && <p className="text-muted text-center">Aucun numéro de téléphone valide disponible</p>}
                 </>
               )}
             </div>
