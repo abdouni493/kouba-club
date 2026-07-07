@@ -18,3 +18,18 @@ export async function uploadImage(bucket: ImageBucket, file: File): Promise<stri
   const { data } = supabase.storage.from(bucket).getPublicUrl(path);
   return data.publicUrl;
 }
+
+/** Uploads a base64 PDF (as produced by src/lib/pdf.ts) and returns its public URL, for linking in an SMS. */
+export async function uploadPdfForSms(base64: string): Promise<string> {
+  const byteChars = atob(base64);
+  const bytes = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+
+  const path = `${crypto.randomUUID()}.pdf`;
+  const { error } = await supabase.storage.from('sms-attachments').upload(path, blob, { cacheControl: '3600', upsert: false, contentType: 'application/pdf' });
+  if (error) throw new Error(error.message);
+
+  const { data } = supabase.storage.from('sms-attachments').getPublicUrl(path);
+  return data.publicUrl;
+}

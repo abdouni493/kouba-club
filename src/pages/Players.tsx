@@ -5,7 +5,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import Barcode from 'react-barcode';
 import {
   Users, Plus, Eye, Pencil, Trash2, Ticket, CreditCard, CircleDollarSign, Calendar,
-  Phone, Mail, MapPin, User, Bell, Check, Upload, Printer, Trophy, X, ScanLine, AlertTriangle,
+  Phone, Mail, MessageSquare, MapPin, User, Bell, Check, Upload, Printer, Trophy, X, ScanLine, AlertTriangle,
   HeartPulse, FileText, UserPlus, ImagePlus, Camera, Loader2,
   ClipboardList, ClipboardCheck, Shield, Clock,
 } from 'lucide-react';
@@ -17,9 +17,10 @@ import { useToast } from '../context/ToastContext';
 import { useScan } from '../components/scan/ScanCenter';
 import { useLookups } from '../lib/selectors';
 import { usePermissions } from '../lib/permissions';
-import { uploadImage } from '../lib/storage';
+import { uploadImage, uploadPdfForSms } from '../lib/storage';
 import { money, uid, today, fmtDate, addDays, daysUntil, cx } from '../lib/utils';
 import { sendClubEmail } from '../lib/email';
+import { sendClubSms, normalizePhoneE164 } from '../lib/sms';
 import { buildPlayerSubscriptionPdf, buildSubscriptionInvoicePdf } from '../lib/pdf';
 import { insuranceStatus } from '../lib/insurance';
 import type { Player, AssignedSubscription, Payment, MedicalRecord, PlayerEvaluation, PlayerInsurance } from '../lib/types';
@@ -1049,8 +1050,11 @@ export default function Players() {
 
   function EmailAskModal({ player, onClose }: { player: Player; onClose: () => void }) {
     const parent = player.parentId ? L.par[player.parentId] : undefined;
+    const [channel, setChannel] = useState<'email' | 'sms'>('email');
     const [sending, setSending] = useState(false);
     const [printing, setPrinting] = useState(false);
+    const playerPhone = normalizePhoneE164(player.phone);
+    const parentPhone = parent?.phone ? normalizePhoneE164(parent.phone) : null;
     const printInvoice = async () => {
       setPrinting(true);
       try {
@@ -1064,18 +1068,31 @@ export default function Players() {
       }
     };
     const send = async () => {
-      const recipients = [
-        player.email ? { email: player.email, name: `${player.firstName} ${player.lastName}` } : null,
-        parent?.email ? { email: parent.email, name: `${parent.firstName} ${parent.lastName}` } : null,
-      ].filter((r): r is { email: string; name: string } => !!r);
-      if (recipients.length === 0) return;
+      const a = player.assignedSubscription;
       setSending(true);
       try {
-        const a = player.assignedSubscription;
-        const html = `<p>Bonjour,</p><p>Confirmation d'abonnement pour ${player.firstName} ${player.lastName}${a ? ` : ${L.timingName(a.timingId)} — ${money(a.price)} (exp. ${fmtDate(a.expiryDate)})` : ''}.</p><p>Vous trouverez la fiche complète en pièce jointe.</p>`;
-        const pdf = await buildPlayerSubscriptionPdf(data.club, player, parent, L);
-        await sendClubEmail(data.club, recipients, t('players.sendMail'), html, [{ name: pdf.filename, content: pdf.base64 }]);
-        toast('E-mail envoyé', 'success');
+        if (channel === 'email') {
+          const recipients = [
+            player.email ? { email: player.email, name: `${player.firstName} ${player.lastName}` } : null,
+            parent?.email ? { email: parent.email, name: `${parent.firstName} ${parent.lastName}` } : null,
+          ].filter((r): r is { email: string; name: string } => !!r);
+          if (recipients.length === 0) return;
+          const html = `<p>Bonjour,</p><p>Confirmation d'abonnement pour ${player.firstName} ${player.lastName}${a ? ` : ${L.timingName(a.timingId)} — ${money(a.price)} (exp. ${fmtDate(a.expiryDate)})` : ''}.</p><p>Vous trouverez la fiche complète en pièce jointe.</p>`;
+          const pdf = await buildPlayerSubscriptionPdf(data.club, player, parent, L);
+          await sendClubEmail(data.club, recipients, t('players.sendMail'), html, [{ name: pdf.filename, content: pdf.base64 }]);
+          toast('E-mail envoyé', 'success');
+        } else {
+          const phones = [...new Set([playerPhone, parentPhone].filter((p): p is string => !!p))];
+          if (phones.length === 0) return;
+          const pdf = await buildPlayerSubscriptionPdf(data.club, player, parent, L);
+          const link = await uploadPdfForSms(pdf.base64);
+          const text = `Confirmation d'abonnement pour ${player.firstName} ${player.lastName}${a ? ` : ${L.timingName(a.timingId)} — ${money(a.price)} (exp. ${fmtDate(a.expiryDate)})` : ''}. Fiche complète : ${link}`;
+          let ok = 0, fail = 0;
+          for (const phone of phones) {
+            try { await sendClubSms(phone, text); ok++; } catch { fail++; }
+          }
+          toast(fail === 0 ? `${ok} SMS envoyé(s)` : `${ok} envoyé(s), ${fail} échoué(s)`, fail === 0 ? 'success' : 'error');
+        }
         onClose();
       } catch (err) {
         toast(err instanceof Error ? err.message : 'Échec de l\'envoi', 'error');
@@ -1083,6 +1100,7 @@ export default function Players() {
         setSending(false);
       }
     };
+    const canSend = channel === 'email' ? !!(player.email || parent?.email) : !!(playerPhone || parentPhone);
     return (
       <Modal open onClose={onClose} size="md" title="Abonnement assigné ✓" subtitle={L.playerName(player)}>
         <div className="space-y-5 py-1">
@@ -1096,16 +1114,31 @@ export default function Players() {
             </button>
           </div>
 
-          {/* Email confirmation */}
+          {/* Email / SMS confirmation */}
           <div className="rounded-2xl bg-surface-2 border border-line/10 p-4 text-center">
-            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-accent/15 text-accent mb-3"><Mail className="h-6 w-6" /></div>
-            <p className="text-fg font-semibold">Envoyer la confirmation par e-mail ?</p>
-            <div className="mt-2 space-y-1 text-sm">
-              {player.email && <p className="text-fg">{player.email} <span className="text-muted">(joueur)</span></p>}
-              {parent?.email && <p className="text-fg">{parent.email} <span className="text-muted">(parent)</span></p>}
-              {!player.email && !parent?.email && <p className="text-muted">Aucune adresse e-mail disponible</p>}
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-accent/15 text-accent mb-3">
+              {channel === 'email' ? <Mail className="h-6 w-6" /> : <MessageSquare className="h-6 w-6" />}
             </div>
-            <button onClick={send} className="btn-primary mt-4 w-full" disabled={sending || (!player.email && !parent?.email)}>
+            <p className="text-fg font-semibold">Envoyer la confirmation ?</p>
+            <div className="mt-3 flex justify-center">
+              <Segmented value={channel} onChange={setChannel} options={[{ value: 'email', label: 'E-mail' }, { value: 'sms', label: 'SMS' }]} />
+            </div>
+            <div className="mt-3 space-y-1 text-sm">
+              {channel === 'email' ? (
+                <>
+                  {player.email && <p className="text-fg">{player.email} <span className="text-muted">(joueur)</span></p>}
+                  {parent?.email && <p className="text-fg">{parent.email} <span className="text-muted">(parent)</span></p>}
+                  {!player.email && !parent?.email && <p className="text-muted">Aucune adresse e-mail disponible</p>}
+                </>
+              ) : (
+                <>
+                  {playerPhone && <p className="text-fg">{playerPhone} <span className="text-muted">(joueur)</span></p>}
+                  {parentPhone && <p className="text-fg">{parentPhone} <span className="text-muted">(parent)</span></p>}
+                  {!playerPhone && !parentPhone && <p className="text-muted">Aucun numéro de téléphone valide disponible</p>}
+                </>
+              )}
+            </div>
+            <button onClick={send} className="btn-primary mt-4 w-full" disabled={sending || !canSend}>
               <Check className="h-4 w-4" />{sending ? '…' : t('common.send')}
             </button>
           </div>

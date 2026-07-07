@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import {
-  Dumbbell, Plus, Eye, Pencil, Trash2, Percent, CircleDollarSign, Phone, Mail,
+  Dumbbell, Plus, Eye, Pencil, Trash2, Percent, CircleDollarSign, Phone, Mail, MessageSquare,
   User, Ticket, Check, X, Wallet, CalendarClock, Bell, ChevronDown, Clock,
 } from 'lucide-react';
 import { PageHeader, Badge, EmptyState, useConfirm, Avatar, Tabs } from '../components/ui/Display';
@@ -15,6 +15,8 @@ import { usePermissions } from '../lib/permissions';
 import { money, uid, today, fmtDate, daysUntil } from '../lib/utils';
 import { computeUnpaid, monthLabel } from '../lib/staff';
 import { sendClubEmail } from '../lib/email';
+import { sendClubSms, normalizePhoneE164 } from '../lib/sms';
+import { uploadPdfForSms } from '../lib/storage';
 import { buildPlayerSubscriptionPdf } from '../lib/pdf';
 import type { Trainer, MoneyEntry } from '../lib/types';
 
@@ -316,6 +318,7 @@ export default function Trainers() {
     const soon = data.players.filter((p) => { const d = p.assignedSubscription ? daysUntil(p.assignedSubscription.expiryDate) : -999; return d >= 0 && d <= 7; });
     const expired = data.players.filter((p) => p.assignedSubscription && daysUntil(p.assignedSubscription.expiryDate) < 0);
     const list = [...expired, ...soon];
+    const [channel, setChannel] = useState<'email' | 'sms'>('email');
     const [sel, setSel] = useState<string[]>(list.map((p) => p.id));
     const [sending, setSending] = useState(false);
     const toggle = (id: string) => setSel((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
@@ -326,37 +329,55 @@ export default function Trainers() {
         const p = list.find((x) => x.id === id);
         if (!p?.assignedSubscription) continue;
         const parent = p.parentId ? L.par[p.parentId] : undefined;
-        const recipients = [
-          p.email ? { email: p.email, name: L.playerName(p) } : null,
-          parent?.email ? { email: parent.email, name: `${parent.firstName} ${parent.lastName}` } : null,
-        ].filter((r): r is { email: string; name: string } => !!r);
-        if (recipients.length === 0) continue;
         const d = daysUntil(p.assignedSubscription.expiryDate);
         const status = d < 0 ? `expiré depuis ${-d}j` : `expire dans ${d}j`;
-        const html = `<p>Bonjour,</p><p>L'abonnement de ${L.playerName(p)} (${status}, échéance ${fmtDate(p.assignedSubscription.expiryDate)}) nécessite votre attention.</p><p>Vous trouverez la fiche complète en pièce jointe.</p>`;
-        try {
-          const pdf = await buildPlayerSubscriptionPdf(data.club, p, parent, L);
-          await sendClubEmail(data.club, recipients, t('trainers.notifyExpiry'), html, [{ name: pdf.filename, content: pdf.base64 }]);
-          ok++;
-        } catch { fail++; }
+        if (channel === 'email') {
+          const recipients = [
+            p.email ? { email: p.email, name: L.playerName(p) } : null,
+            parent?.email ? { email: parent.email, name: `${parent.firstName} ${parent.lastName}` } : null,
+          ].filter((r): r is { email: string; name: string } => !!r);
+          if (recipients.length === 0) continue;
+          const html = `<p>Bonjour,</p><p>L'abonnement de ${L.playerName(p)} (${status}, échéance ${fmtDate(p.assignedSubscription.expiryDate)}) nécessite votre attention.</p><p>Vous trouverez la fiche complète en pièce jointe.</p>`;
+          try {
+            const pdf = await buildPlayerSubscriptionPdf(data.club, p, parent, L);
+            await sendClubEmail(data.club, recipients, t('trainers.notifyExpiry'), html, [{ name: pdf.filename, content: pdf.base64 }]);
+            ok++;
+          } catch { fail++; }
+        } else {
+          const phones = [...new Set([
+            normalizePhoneE164(p.phone),
+            parent?.phone ? normalizePhoneE164(parent.phone) : null,
+          ].filter((x): x is string => !!x))];
+          if (phones.length === 0) continue;
+          try {
+            const pdf = await buildPlayerSubscriptionPdf(data.club, p, parent, L);
+            const link = await uploadPdfForSms(pdf.base64);
+            const text = `L'abonnement de ${L.playerName(p)} (${status}, échéance ${fmtDate(p.assignedSubscription.expiryDate)}) nécessite votre attention. Fiche complète : ${link}`;
+            for (const phone of phones) await sendClubSms(phone, text);
+            ok++;
+          } catch { fail++; }
+        }
       }
       setSending(false);
-      toast(fail === 0 ? `${ok} e-mail(s) envoyé(s)` : `${ok} envoyé(s), ${fail} échoué(s)`, fail === 0 ? 'success' : 'error');
+      toast(fail === 0 ? `${ok} ${channel === 'email' ? 'e-mail(s)' : 'SMS'} envoyé(s)` : `${ok} envoyé(s), ${fail} échoué(s)`, fail === 0 ? 'success' : 'error');
       onClose();
     };
     return (
       <Modal open onClose={onClose} size="lg" title={t('trainers.notifyExpiry')} subtitle="Abonnements expirés & bientôt expirés"
-        footer={<><button onClick={onClose} className="btn-ghost">{t('common.cancel')}</button><button onClick={send} className="btn-primary" disabled={!sel.length || sending}><Mail className="h-4 w-4" />{sending ? '…' : `${t('common.send')} (${sel.length})`}</button></>}>
-        <div className="space-y-2 max-h-[55vh] overflow-y-auto">
-          {list.length === 0 && <EmptyState title="Aucun abonnement à notifier" icon={<Bell className="h-7 w-7" />} />}
-          {list.map((p) => { const d = daysUntil(p.assignedSubscription!.expiryDate); const on = sel.includes(p.id); return (
-            <button key={p.id} onClick={() => toggle(p.id)} className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-colors ${on ? 'bg-accent/10 border border-accent/30' : 'bg-surface-2 border border-transparent'}`}>
-              <input type="checkbox" readOnly checked={on} className="h-4 w-4 accent-[rgb(var(--accent))]" />
-              <Avatar name={L.playerName(p)} id={p.id} size={36} />
-              <div className="flex-1 min-w-0"><p className="text-sm font-semibold text-fg">{L.playerName(p)}</p><p className="text-xs text-muted">{p.email || '—'}</p></div>
-              <Badge tone={d < 0 ? 'danger' : 'warning'}>{d < 0 ? t('players.expired') : `${d}j`}</Badge>
-            </button>
-          ); })}
+        footer={<><button onClick={onClose} className="btn-ghost">{t('common.cancel')}</button><button onClick={send} className="btn-primary" disabled={!sel.length || sending}>{channel === 'email' ? <Mail className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}{sending ? '…' : `${t('common.send')} (${sel.length})`}</button></>}>
+        <div className="space-y-3">
+          <Segmented value={channel} onChange={setChannel} options={[{ value: 'email', label: 'E-mail' }, { value: 'sms', label: 'SMS' }]} />
+          <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+            {list.length === 0 && <EmptyState title="Aucun abonnement à notifier" icon={<Bell className="h-7 w-7" />} />}
+            {list.map((p) => { const d = daysUntil(p.assignedSubscription!.expiryDate); const on = sel.includes(p.id); return (
+              <button key={p.id} onClick={() => toggle(p.id)} className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-colors ${on ? 'bg-accent/10 border border-accent/30' : 'bg-surface-2 border border-transparent'}`}>
+                <input type="checkbox" readOnly checked={on} className="h-4 w-4 accent-[rgb(var(--accent))]" />
+                <Avatar name={L.playerName(p)} id={p.id} size={36} />
+                <div className="flex-1 min-w-0"><p className="text-sm font-semibold text-fg">{L.playerName(p)}</p><p className="text-xs text-muted">{channel === 'email' ? (p.email || '—') : (normalizePhoneE164(p.phone) || '—')}</p></div>
+                <Badge tone={d < 0 ? 'danger' : 'warning'}>{d < 0 ? t('players.expired') : `${d}j`}</Badge>
+              </button>
+            ); })}
+          </div>
         </div>
       </Modal>
     );

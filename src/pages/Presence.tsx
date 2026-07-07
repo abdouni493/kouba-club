@@ -11,7 +11,7 @@ import { useToast } from '../context/ToastContext';
 import { useLookups } from '../lib/selectors';
 import { usePermissions } from '../lib/permissions';
 import { uid, today, fmtDate, cx } from '../lib/utils';
-import { isScheduledOn, attendanceOn, notifyAttendanceEmail } from '../lib/attendance';
+import { isScheduledOn, attendanceOn, notifyAttendanceEmail, notifyAttendanceSms } from '../lib/attendance';
 import type { AttendanceRecord, Player, Timing } from '../lib/types';
 
 interface ScheduledRow { player: Player; timing: Timing }
@@ -55,8 +55,8 @@ export default function Presence() {
   const absentCount = withStatus.filter((r) => r.record?.status === 'absent').length;
   const pendingCount = withStatus.filter((r) => !r.record).length;
 
-  /** Insert one attendance record + best-effort parent e-mail. Returns whether the e-mail went out. */
-  const saveRecord = async (player: Player, timing: Timing, status: 'present' | 'absent'): Promise<boolean> => {
+  /** Insert one attendance record + best-effort parent e-mail/SMS. Returns which channels went out. */
+  const saveRecord = async (player: Player, timing: Timing, status: 'present' | 'absent'): Promise<{ emailSent: boolean; smsSent: boolean }> => {
     const existing = attendanceOn(player, timing.id, date);
     const rec: AttendanceRecord = { id: uid('att'), timingId: timing.id, date, status };
     const next = existing
@@ -64,12 +64,17 @@ export default function Presence() {
       : [rec, ...player.attendanceRecords];
     await updateItem('players', player.id, { attendanceRecords: next });
     const parent = player.parentId ? L.par[player.parentId] : undefined;
-    return notifyAttendanceEmail(data.club, player, parent, rec, timing.name);
+    const [emailSent, smsSent] = await Promise.all([
+      notifyAttendanceEmail(data.club, player, parent, rec, timing.name),
+      notifyAttendanceSms(player, parent, rec, timing.name),
+    ]);
+    return { emailSent, smsSent };
   };
 
   const mark = async (player: Player, timing: Timing, status: 'present' | 'absent') => {
-    const sent = await saveRecord(player, timing, status);
-    toast(`${L.playerName(player)} — ${status === 'present' ? 'présent(e)' : 'absent(e)'}${sent ? ' · e-mail envoyé' : ''}`, 'success');
+    const { emailSent, smsSent } = await saveRecord(player, timing, status);
+    const parts = [emailSent && 'e-mail envoyé', smsSent && 'SMS envoyé'].filter(Boolean).join(' · ');
+    toast(`${L.playerName(player)} — ${status === 'present' ? 'présent(e)' : 'absent(e)'}${parts ? ` · ${parts}` : ''}`, 'success');
   };
 
   /** Mark every still-unmarked scheduled player of the date as absent. */
@@ -88,15 +93,16 @@ export default function Presence() {
     setClosing(true);
     try {
       const results = await Promise.all(missing.map(({ player, timing }) =>
-        saveRecord(player, timing, 'absent').catch(() => false),
+        saveRecord(player, timing, 'absent').catch(() => ({ emailSent: false, smsSent: false })),
       ));
       const withEmail = missing.filter(({ player }) => {
         const parent = player.parentId ? L.par[player.parentId] : undefined;
         return !!parent?.email;
       }).length;
-      const sent = results.filter(Boolean).length;
-      const failed = withEmail - sent;
-      toast(`${missing.length} absences enregistrées · ${sent} e-mails envoyés${failed > 0 ? `, ${failed} échecs` : ''}`, 'success');
+      const sentEmail = results.filter((r) => r.emailSent).length;
+      const sentSms = results.filter((r) => r.smsSent).length;
+      const failed = withEmail - sentEmail;
+      toast(`${missing.length} absences enregistrées · ${sentEmail} e-mails envoyés${failed > 0 ? `, ${failed} échecs` : ''} · ${sentSms} SMS envoyés`, 'success');
     } finally {
       setClosing(false);
     }

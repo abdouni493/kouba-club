@@ -7,6 +7,7 @@
 import dayjs from 'dayjs';
 import { WEEK_DAYS, fmtDate } from './utils';
 import { sendClubEmail } from './email';
+import { sendClubSms, normalizePhoneE164 } from './sms';
 import type { AttendanceRecord, ClubInfo, Parent, Player, Timing } from './types';
 
 /** Lowercase weekday name ('monday'..'sunday') of a YYYY-MM-DD date. */
@@ -44,6 +45,26 @@ export async function notifyAttendanceEmail(
     return true;
   } catch (err) {
     console.error('attendance email failed:', err);
+    return false;
+  }
+}
+
+/**
+ * Best-effort SMS to the player's parent after an attendance record is
+ * saved, parallel to notifyAttendanceEmail. Never throws.
+ */
+export async function notifyAttendanceSms(
+  player: Player, parent: Parent | undefined, record: AttendanceRecord, timingName: string,
+): Promise<boolean> {
+  const phone = parent?.phone ? normalizePhoneE164(parent.phone) : null;
+  if (!phone) return false;
+  const present = record.status === 'present';
+  const text = `${present ? 'Présence' : 'Absence'} de ${player.firstName} ${player.lastName} à la séance "${timingName}" du ${fmtDate(record.date)}.`;
+  try {
+    await sendClubSms(phone, text);
+    return true;
+  } catch (err) {
+    console.error('attendance sms failed:', err);
     return false;
   }
 }

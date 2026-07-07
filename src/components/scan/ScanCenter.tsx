@@ -16,7 +16,7 @@ import { useLookups } from '../../lib/selectors';
 import { usePermissions } from '../../lib/permissions';
 import { fmtDate, money, today, uid } from '../../lib/utils';
 import { resolvePlayerByCode, subStatus, type SubStatus } from '../../lib/scan';
-import { attendanceOn, isScheduledOn, notifyAttendanceEmail } from '../../lib/attendance';
+import { attendanceOn, isScheduledOn, notifyAttendanceEmail, notifyAttendanceSms } from '../../lib/attendance';
 import type { AttendanceRecord, Player } from '../../lib/types';
 import type { IScannerControls } from '@zxing/browser';
 
@@ -334,6 +334,9 @@ function ScanModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     // Best-effort parent notification — never blocks the scan flow.
     notifyAttendanceEmail(data.club, player, parent, rec, timing.name).then((sent) => {
       if (sent) toast('E-mail de présence envoyé au parent', 'info');
+    });
+    notifyAttendanceSms(player, parent, rec, timing.name).then((sent) => {
+      if (sent) toast('SMS de présence envoyé au parent', 'info');
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, player]);
